@@ -1,0 +1,47 @@
+name: OCI A1 capacity
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      check:
+        description: Read-only checks (no launch or workflow disable)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: oci-a1-boot-volume
+  cancel-in-progress: false
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install official SDK
+        run: env -u __PYVENV_LAUNCHER__ python -m pip install -r requirements.txt
+      - name: Try once
+        id: launch
+        env:
+          OCI_CONFIG: ${{ secrets.OCI_CONFIG }}
+          OCI_API_KEY: ${{ secrets.OCI_API_KEY }}
+          CHECK_ONLY: ${{ inputs.check == true && 'true' || 'false' }}
+        shell: bash
+        run: |
+          args=()
+          if [[ "$CHECK_ONLY" == true ]]; then args+=(--check); fi
+          env -u __PYVENV_LAUNCHER__ python launch.py "${args[@]}"
+      - name: Disable workflow after accepted launch
+        if: steps.launch.outputs.result == 'launched'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method PUT "repos/$GITHUB_REPOSITORY/actions/workflows/capacity.yml/disable"

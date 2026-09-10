@@ -1,0 +1,9 @@
+__pycache__/
+.venv/
+.env
+.env.*
+*.pem
+*.key
+.oci/
+config
+oci_config*

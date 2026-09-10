@@ -3,6 +3,8 @@ name: OCI A1 capacity
 on:
   schedule:
     - cron: '*/10 * * * *'
+  repository_dispatch:
+    types: [retry]
   workflow_dispatch:
     inputs:
       check:
@@ -11,7 +13,7 @@ on:
         default: false
 
 permissions:
-  contents: read
+  contents: write
   actions: write
 
 concurrency:
@@ -21,7 +23,7 @@ concurrency:
 jobs:
   launch:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,3 +47,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh api --method PUT "repos/$GITHUB_REPOSITORY/actions/workflows/capacity.yml/disable"
+      - name: Schedule next attempt
+        if: steps.launch.outputs.result == 'capacity'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 540
+          gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" \
+            -f event_type=retry

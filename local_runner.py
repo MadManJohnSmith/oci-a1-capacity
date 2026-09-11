@@ -14,9 +14,27 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 import oci
 from launch import AD, BOOT, REGION, SUBNET, TENANCY
+
+
+def retry_after_seconds(headers):
+    value = next((v for k, v in (headers or {}).items() if k.lower() == 'retry-after'), None)
+    if value is None:
+        return None
+    value = str(value).strip()
+    if value.isascii() and value.isdigit():
+        return int(value)
+    try:
+        when = parsedate_to_datetime(value)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return max(0, when.timestamp() - time.time())
+    except (ValueError, TypeError, OverflowError):
+        return None
+
 
 CACHE = Path.home() / '.cache/oci-vm'
 STOP = threading.Event()
@@ -65,11 +83,15 @@ def clients():
             oci.core.VirtualNetworkClient(config, **options))
 
 
-def inspect(compute, block):
-    volume = block.get_boot_volume(BOOT).data
+def direct(fn, *args, **kwargs):
+    return fn(*args, **kwargs)
+
+
+def inspect(compute, block, call=direct):
+    volume = call(block.get_boot_volume, BOOT).data
     if volume.availability_domain != AD or volume.compartment_id != TENANCY:
         raise ValueError('Unexpected boot volume location')
-    attachments = oci.pagination.list_call_get_all_results(
+    attachments = call(oci.pagination.list_call_get_all_results,
         compute.list_boot_volume_attachments, availability_domain=AD,
         compartment_id=volume.compartment_id, boot_volume_id=BOOT).data
     active = [a for a in attachments if a.lifecycle_state != 'DETACHED']
@@ -78,17 +100,17 @@ def inspect(compute, block):
     return volume, active
 
 
-def monitor(compute, network, instance_id):
-    instance = compute.get_instance(instance_id).data
+def monitor(compute, network, instance_id, call=direct):
+    instance = call(compute.get_instance, instance_id).data
     result = dict(result='monitor', instance_id=instance_id, instance_state=instance.lifecycle_state)
     if instance.lifecycle_state == 'RUNNING':
-        vnics = oci.pagination.list_call_get_all_results(
+        vnics = call(oci.pagination.list_call_get_all_results,
             compute.list_vnic_attachments, compartment_id=instance.compartment_id,
             instance_id=instance_id).data
         for attachment in vnics:
             if attachment.lifecycle_state != 'ATTACHED':
                 continue
-            ip = network.get_vnic(attachment.vnic_id).data.public_ip
+            ip = call(network.get_vnic, attachment.vnic_id).data.public_ip
             if not ip:
                 continue
             result['public_ip'] = ip
@@ -117,6 +139,9 @@ def main():
     signal.signal(signal.SIGTERM, lambda *_: STOP.set())
     signal.signal(signal.SIGINT, lambda *_: STOP.set())
     try:
+        capacity_delay = int(os.environ.get('OCI_CAPACITY_DELAY', '60'))
+        if not 30 <= capacity_delay <= 300:
+            raise ValueError('OCI_CAPACITY_DELAY must be an integer from 30 to 300')
         compute, block, network = clients()
         if args.check:
             volume, active = inspect(compute, block)
@@ -139,11 +164,28 @@ def main():
             while not STOP.is_set():
                 if STOP.wait(max(0, (state.get('next_attempt_epoch') or 0) - time.time())):
                     break
-                started = stamp()
+                started_epoch = time.time()
+                started = stamp(started_epoch)
+                operations = []
+
+                def call(fn, *args, **kwargs):
+                    operation = args[0].__name__ if fn is oci.pagination.list_call_get_all_results else fn.__name__
+                    entry = dict(operation=operation, http_status=None)
+                    operations.append(entry)
+                    try:
+                        response = fn(*args, **kwargs)
+                        entry['http_status'] = response.status
+                        return response
+                    except oci.exceptions.ServiceError as exc:
+                        entry['http_status'] = exc.status
+                        raise
+
+                retry_after = None
+                recovery = None
                 delay = 300
                 permanent = False
                 try:
-                    volume, active = inspect(compute, block)
+                    volume, active = inspect(compute, block, call)
                     ids = {a.instance_id for a in active}
                     if len(ids) > 1 or (ids and state.get('instance_id') and state['instance_id'] not in ids):
                         raise ValueError('Conflicting attachment identities')
@@ -151,7 +193,7 @@ def main():
                         state['instance_id'] = next(iter(ids))
                         atomic(path, state)
                     if state.get('instance_id'):
-                        result = monitor(compute, network, state['instance_id'])
+                        result = monitor(compute, network, state['instance_id'], call)
                         if result['instance_state'] == 'RUNNING' and not notified:
                             notify('Instance RUNNING; ' + result.get('public_ip', 'public IP not yet available'))
                             notified = True
@@ -172,7 +214,7 @@ def main():
                         state['launch_pending'] = True
                         state['next_attempt_epoch'] = time.time() + 300
                         atomic(path, state)
-                        response = compute.launch_instance(details, opc_retry_token=state['token'])
+                        response = call(compute.launch_instance, details, opc_retry_token=state['token'])
                         state['instance_id'] = response.data.id
                         if not state['instance_id']:
                             raise ValueError('Launch accepted without instance identity')
@@ -181,9 +223,13 @@ def main():
                         result = dict(result='accepted', instance_id=state['instance_id'], instance_state=response.data.lifecycle_state)
                 except oci.exceptions.ServiceError as exc:
                     if exc.status == 429:
-                        result, delay = dict(result='throttled', http_status=429), 600
+                        state['throttle_streak'] = state.get('throttle_streak', 0) + 1
+                        state.setdefault('throttle_started_epoch', started_epoch)
+                        retry_after = retry_after_seconds(exc.headers)
+                        delay = max(min(600, 30 * 2 ** min(state['throttle_streak'] - 1, 5)), retry_after or 0)
+                        result = dict(result='throttled', http_status=429)
                     elif exc.status == 500 and exc.code == 'InternalError' and 'out of host capacity' in exc.message.lower():
-                        result = dict(result='capacity', http_status=500)
+                        result, delay = dict(result='capacity', http_status=500), capacity_delay
                     elif exc.status in (408, 500, 502, 503, 504):
                         result = dict(result='transient_service_error', http_status=exc.status)
                     else:
@@ -195,13 +241,24 @@ def main():
                     result = dict(result='network_error', error_type=type(exc).__name__)
                 except Exception as exc:
                     result, permanent = dict(result='permanent_error', error_type=type(exc).__name__), True
+                if result['result'] in ('accepted', 'capacity'):
+                    throttle_started = state.pop('throttle_started_epoch', None)
+                    if throttle_started is not None:
+                        recovery = max(0, time.time() - throttle_started)
+                    state['throttle_streak'] = 0
                 next_time = None if permanent else time.time() + delay
                 state['next_attempt_epoch'] = next_time
                 atomic(path, state)
                 status = dict(result, attempt_started=started, last_result_time=stamp(), next_attempt=stamp(next_time) if next_time else None,
-                              next_attempt_epoch=next_time, delay_seconds=None if permanent else delay)
+                              next_attempt_epoch=next_time, delay_seconds=None if permanent else delay,
+                              capacity_delay_seconds=capacity_delay, operations=operations,
+                              duration_seconds=round(time.time() - started_epoch, 3),
+                              throttle_streak=state.get('throttle_streak', 0), retry_after_seconds=retry_after,
+                              throttle_recovery_seconds=recovery)
                 atomic(CACHE / 'status.json', status)
-                LOG.info('Result=%s next_attempt=%s', result['result'], status['next_attempt'])
+                LOG.info('Attempt=%s', json.dumps({k: status[k] for k in (
+                    'result', 'attempt_started', 'next_attempt', 'delay_seconds', 'operations',
+                    'duration_seconds', 'throttle_streak', 'retry_after_seconds', 'throttle_recovery_seconds')}))
                 if permanent:
                     notify('Permanent OCI error; local runner stopped. See status.json.')
                     return 2

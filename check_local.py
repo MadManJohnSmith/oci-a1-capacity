@@ -52,6 +52,19 @@ if status_path.exists():
         from datetime import datetime
         gap = status['next_attempt_epoch'] - datetime.fromisoformat(status['last_result_time']).timestamp()
         assert abs(gap - status['delay_seconds']) < 1
+        delay = status['delay_seconds']
+        if status['result'] == 'capacity':
+            assert 30 <= delay <= 300
+            assert delay == status.get('capacity_delay_seconds', 300)
+            assert status.get('throttle_streak', 0) == 0
+        elif status['result'] == 'throttled' and 'throttle_streak' in status:
+            streak = status['throttle_streak']
+            assert streak >= 1
+            assert delay == max(min(600, 30 * 2 ** min(streak - 1, 5)), status['retry_after_seconds'] or 0)
+        else:
+            assert delay >= 300
+        if status['result'] == 'monitor':
+            assert delay == 300
         report['verified_scheduled_delay_seconds'] = status['delay_seconds']
         atomic(CACHE / 'assessment.json', report)
 print(json.dumps(report, indent=2))

@@ -57,3 +57,15 @@ Commit URL and completion timing are recorded in the private local review cache 
 - No evidence-backed implementation defect was found; report-only review. Public report contains no OCIDs, IPs, fingerprints, emails, credentials, personal paths, or raw logs.
 
 Commit URL and completion timing are recorded in the private local review cache after push/remote-SHA verification.
+
+
+## Round 6 — 2026-09-11
+
+- Baseline: 2026-09-11T06:05:02.380650Z (commit `50f4d3d`). Evidence cutoff: 2026-09-11T06:56:20.245311Z. Actual observed interval: **3,077.864661 seconds (51m 17.864661s)**. **No complete 3,600-second interval; this observation is not counted as a completed hourly review.** The retry process remained running; incomplete elapsed time was not counted.
+- Real read-only `local_runner.py --check` passed at 06:55:56Z: boot volume AVAILABLE, zero active attachments. Real `check_local.py` passed at 06:56:20Z with sanitized OCI SDK, timeout/no-retry assertions, and the actual 60-second scheduled-delay assertion. No mock OCI checks were used.
+- The sequential authorized retry recorded **50 capacity results**, each launch HTTP 500, from 06:06:01Z through 06:56:12Z. Attempt durations were **0.933–3.059s (mean 1.438s)**; effective wait was **60s for every attempt**; no `Retry-After`, 429, network, transient, permanent, accepted, or recovery result occurred. No instance was created or attached.
+- A1 limits remain 2 OCPU and 12 GB available, zero used, at AD and regional scopes; no quota policies returned. Root-compartment/configured-AD storage remains one AVAILABLE 200-GB boot volume and zero block volumes; total/free storage remains 200 GB used, zero GB available. These limits are not billing proof or an Always Free guarantee.
+- The authorized local retry process remains running under the sanitized OCI venv (`local_runner.py`, one process, sequential/no burst). `oci-vm.service` is inactive/dead in this inspection environment with zero restarts and no ExecStop; no local restart was performed, and the running process was left untouched. GitHub API verified the sole workflow remains `capacity.yml`, `disabled_manually`.
+- No OCI lifecycle mutation, resource creation/deletion, shutdown/reboot, workflow change, automation, mock, or unrelated code change occurred. This is report-only because no evidence-backed implementation defect was found. Public report contains no OCIDs, IPs, fingerprints, emails, credentials, personal paths, or raw logs.
+
+Commit URL and remote SHA verification follow after committing and pushing this report.

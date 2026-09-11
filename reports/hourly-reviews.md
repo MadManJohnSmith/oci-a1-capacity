@@ -45,3 +45,15 @@ Commit URL and completion timing are recorded in the private local review cache 
 - GitHub API verified the sole workflow remains `capacity.yml`, state `disabled_manually`. No OCI lifecycle mutation, resource creation/deletion, restart, shutdown/reboot, workflow change, automation, or extra resource occurred. No evidence-backed code change was found; report-only review.
 
 Commit URL and completion timing are recorded in the private local review cache after push/remote-SHA verification.
+
+
+## Round 5 — 2026-09-11
+
+- Baseline: 2026-09-11T04:56:12Z. Evidence cutoff: 2026-09-11T06:05:02.380650Z. Actual observed interval: **4,130.380650 seconds (1h 08m 50.380650s)**. One complete 3,600-second interval; **one completed hourly review**.
+- Real read-only `local_runner.py --check` passed at 06:04:59Z: boot volume AVAILABLE, zero active attachments. Real `check_local.py` passed at 06:05:02Z with sanitized OCI SDK, timeout/no-retry assertions, and the actual 60-second scheduled-delay assertion. No mock OCI checks were used.
+- During this interval, the running authorized local retry recorded **2 capacity results**, both launch HTTP 500 responses, with attempt durations **2.775s** and **1.235s**, effective delays **60s** and **60s**, no Retry-After values, throttle streak 0, and no recovery/accepted launch. No 429, network, or permanent result was measured in the current interval. The older legacy log's 429s remain outside this baseline and are not counted.
+- A1 limits report 2 cores and 12 GB available, zero used, at AD and regional scopes; no quota policies returned. Root-compartment/configured-AD storage remains one AVAILABLE 200-GB boot volume and zero block volumes; total/free storage remains 200 GB used, zero GB remaining. These limits are not billing proof or an Always Free guarantee.
+- The authorized local retry process remains running; systemd unit inspection shows active/running, unchanged main PID, zero restarts, and no ExecStop action. No local restart was performed. GitHub API verified `capacity.yml` remains `disabled_manually`. No OCI lifecycle mutation, resource creation/deletion, shutdown/reboot, workflow change, automation, mock, or unrelated code change occurred.
+- No evidence-backed implementation defect was found; report-only review. Public report contains no OCIDs, IPs, fingerprints, emails, credentials, personal paths, or raw logs.
+
+Commit URL and completion timing are recorded in the private local review cache after push/remote-SHA verification.

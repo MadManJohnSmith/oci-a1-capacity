@@ -12,3 +12,14 @@
 - Included previously untracked `local_runner.py` and `check_local.py` after inspection; no runtime code changes. Updated stale README claims and documented the existing local runner/read-only checks. The runner deliberately fails closed after its 23-hour token window without a known instance; reconcile manually rather than clearing state or blindly renewing the token. Local locking does not exclude other hosts. Public changes omit resource identifiers, addresses, fingerprints, emails, credential paths and raw logs.
 
 Commit URL and completion timing are recorded in the private local review cache after push/remote-SHA verification, avoiding a self-referential commit hash in this report.
+
+
+## Round 2 — 2026-09-11
+
+- Baseline: 2026-09-11T01:58:34Z. Evidence cutoff: 2026-09-11T02:58:52Z. Actual elapsed: **3,618 seconds (1h 00m 18s)**. One complete 3,600-second interval; one review.
+- Real read-only `local_runner.py --check` passed: boot volume AVAILABLE, zero active attachments. Real `check_local.py` passed at 02:58:52Z with sanitized OCI venv Python, SDK timeout/no-retry assertions, and the actual 300-second scheduled-delay assertion. No mock tests were run.
+- A1 limits remain 2 cores and 12 GB available, zero used, at AD and regional scopes; no quota policies returned. Root-compartment/configured-AD storage inventory remains one AVAILABLE 200-GB boot volume and zero block volumes; free-storage and total-storage limits remain 200 GB used, zero GB remaining. These limits are not billing proof or an Always Free guarantee.
+- `oci-vm.service` remained active/running with zero systemd restarts; main process unchanged, unit has no ExecStop. The authorized local retry remained running. No restart, shutdown/reboot, OCI STOP/START/reboot/terminate/delete, extra resource, workflow, or automation action occurred.
+- No evidence-backed code defect or unrelated change found. Report-only review.
+
+Commit URL and completion timing are recorded in the private local review cache after push/remote-SHA verification.

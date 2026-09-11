@@ -102,3 +102,15 @@ Commit URL and remote SHA verification follow after committing and pushing this 
 - No OCI lifecycle mutation, resource creation/deletion, shutdown/reboot, workflow change, automation, mock, or evidence-backed implementation change occurred. Report-only review. Public report contains no OCIDs, IPs, fingerprints, emails, credentials, personal paths, or raw logs.
 
 Commit URL and remote SHA verification follow after committing and pushing this report.
+
+
+## Round 10 — 2026-09-11
+
+- Baseline: 2026-09-11T09:56:24.831412Z (commit `5d92444`). Evidence cutoff: 2026-09-11T10:55:54.920056Z. Actual observed interval: **3,570.088644 seconds (59m 30.088644s)**. **No complete 3,600-second interval; this final observation is incomplete and is not counted as a completed hourly review.**
+- Real read-only `local_runner.py --check` passed at 10:55:54Z: boot volume AVAILABLE, zero active attachments. Real `check_local.py` passed with sanitized OCI SDK, timeout/no-retry assertions, and actual 60-second scheduled-delay assertion. No mock OCI checks were used.
+- The sequential authorized retry recorded **59 capacity results**, each launch HTTP 500, from 09:56:24Z through 10:55:48Z. Attempt durations were **0.972–2.448s (mean 1.457s)**; effective wait was **60s for every attempt**; `Retry-After` was absent on all 59 results, throttle streak remained 0, and no 429, transient, network, permanent, accepted, or recovery result occurred. No instance was created or attached. This reports the observed absence only; it does not claim that 429 never occurred outside this interval.
+- A1 limits remain 2 OCPU and 12 GB available, zero used, at AD and regional scopes; no quota policies returned. Root-compartment/configured-AD storage remains one AVAILABLE 200-GB boot volume and zero block volumes; total/free storage remains 200 GB used, zero GB available. These limits are not billing proof or an Always Free guarantee.
+- The authorized local retry process remains running under the sanitized OCI venv (`local_runner.py`, one process, sequential/no burst). `oci-vm.service` inspection reports `LoadState=not-found`, inactive/dead, zero restarts and no ExecStop; no restart was necessary or performed, and no cloud ExecStop was invoked. GitHub API verified the sole workflow remains `capacity.yml`, `disabled_manually`.
+- No OCI lifecycle mutation, resource creation/deletion, shutdown/reboot, workflow change, automation, mock, or evidence-backed implementation change occurred. Report-only review. Public report contains no OCIDs, IPs, fingerprints, emails, credentials, personal paths, or raw logs.
+
+Commit URL and remote SHA verification follow after committing and pushing this report.

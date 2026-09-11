@@ -23,3 +23,14 @@ Commit URL and completion timing are recorded in the private local review cache 
 - No evidence-backed code defect or unrelated change found. Report-only review.
 
 Commit URL and completion timing are recorded in the private local review cache after push/remote-SHA verification.
+
+
+## Round 3 — 2026-09-11
+
+- Baseline: 2026-09-11T02:58:52Z. Evidence cutoff: 2026-09-11T03:55:48Z. Actual elapsed: **3,416 seconds (56m 56s)**. **No complete 3,600-second interval; this is not counted as a completed hourly review.**
+- Real read-only `local_runner.py --check` passed: boot volume AVAILABLE, zero active attachments. Real `check_local.py` passed at 03:55:48Z with sanitized OCI venv Python, SDK timeout/no-retry assertions, and the actual 300-second scheduled-delay assertion. No mock tests were run.
+- A1 limits remain 2 cores and 12 GB available, zero used, at AD and regional scopes; no quota policies returned. Root-compartment/configured-AD storage inventory remains one AVAILABLE 200-GB boot volume and zero block volumes; free-storage and total-storage limits remain 200 GB used, zero GB remaining. These limits are not billing proof or an Always Free guarantee.
+- `oci-vm.service` remained active/running with zero systemd restarts; main process unchanged, unit has no ExecStop. The authorized local retry remains running with recent capacity results. No restart, shutdown/reboot, OCI STOP/START/reboot/terminate/delete, extra resource, workflow, or automation action occurred.
+- No evidence-backed code defect or unrelated change found. Report-only review. Workflow `capacity.yml` remains `disabled_manually`.
+
+Commit URL and completion timing are recorded in the private local review cache after push/remote-SHA verification.

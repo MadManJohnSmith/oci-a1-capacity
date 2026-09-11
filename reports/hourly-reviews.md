@@ -114,3 +114,12 @@ Commit URL and remote SHA verification follow after committing and pushing this 
 - No OCI lifecycle mutation, resource creation/deletion, shutdown/reboot, workflow change, automation, mock, or evidence-backed implementation change occurred. Report-only review. Public report contains no OCIDs, IPs, fingerprints, emails, credentials, personal paths, or raw logs.
 
 Commit URL and remote SHA verification follow after committing and pushing this report.
+
+## Persistent cycle review — 2026-09-11
+
+- Baseline: 2026-09-11T10:55:54.920056Z, the prior recorded cutoff. Evidence cutoff: 2026-09-11T16:00:57.044693Z. Actual observed interval: **18,302.124637 seconds**. This exceeds 3,600 seconds and is counted as one complete review window.
+- Real read-only `local_runner.py --check` passed at 16:00:55Z: boot volume AVAILABLE and zero active attachments. Real `check_local.py` passed at 16:00:57Z with the configured OCI SDK timeout/no-retry checks and a verified 300-second scheduled delay. No mocks were used.
+- The sequential runner process remained active (one process, no burst). The observed log interval contains **18 capacity results**, each launch HTTP 500. Request durations were **1.973–5.432 seconds**; effective wait was **300 seconds** after every result; `Retry-After` was absent; no 429, network, transient, permanent, accepted, or recovery result was observed. No instance was created or attached.
+- Current OCI state: boot volume AVAILABLE, zero active attachments, no observed instance identity; A1 availability is 2 OCPU and 12 GB at the checked AD and regional scopes; configured storage inventory is one 200-GB boot volume and no block volumes, with 200 GB used and no remaining free allocation in the reported free-storage quota. These observations are not billing proof or an Always Free guarantee.
+- `oci-vm.service` is not installed or visible in this environment (`systemctl cat` reported no files), so no restart was attempted. The runner PID and command were verified directly and left untouched. GitHub Actions workflow listing returned no entries; no workflow was enabled or dispatched.
+- No OCI lifecycle mutation, resource creation/deletion, automation, mock, or code change was made. The public report contains no OCIDs, IPs, fingerprints, emails, credentials, personal paths, or raw logs.

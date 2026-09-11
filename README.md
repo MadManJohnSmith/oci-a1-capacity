@@ -34,4 +34,21 @@ python -m unittest discover -v
 - Solo `500 InternalError` con `Out of host capacity` se trata como falta de capacidad normal. Autenticación, configuración, cuotas, errores de red y otros fallos producen salida no cero sin revelar detalles sensibles.
 - La elegibilidad **Always Free no está garantizada**: verifica tu cuenta, región principal, cuotas y consumos de cómputo, almacenamiento y red. GitHub Actions consume minutos y puede generar costes según el plan.
 
-SDK fijado a `oci==2.185.2`, versión consultada en el entorno local oficial. No se ha creado ningún recurso cloud ni repositorio remoto.
+SDK fijado a `oci==2.185.2`, versión consultada en el entorno local oficial.
+
+## Monitor local persistente
+
+El repositorio remoto existe; el workflow de GitHub está deshabilitado manualmente (verificación: 2026-09-11). No lo habilites mientras el servicio local esté activo.
+
+`local_runner.py` usa la configuración OCI local, un bloqueo local y un token persistente; reintenta cada 300 segundos después de la respuesta (600 ante HTTP 429). Se detiene ante errores permanentes o al caducar su ventana de seguridad de 23 horas sin instancia conocida: requiere reconciliación manual, no borrar el estado ni renovar el token a ciegas. Si encuentra una instancia, solo la monitoriza; no la inicia, detiene ni termina. El bloqueo no excluye otros equipos ni GitHub.
+
+Comprobaciones reales de solo lectura, usando el Python del entorno virtual OCI:
+
+```sh
+env -u PYTHONHOME -u PYTHONPATH -u __PYVENV_LAUNCHER__ "$OCI_VENV/bin/python" local_runner.py --check
+env -u PYTHONHOME -u PYTHONPATH -u __PYVENV_LAUNCHER__ "$OCI_VENV/bin/python" check_local.py
+```
+
+Define `OCI_VENV` con el directorio de tu entorno ya instalado. El monitor inicializa su caché local; `check_local.py` requiere esa caché y guarda allí la evaluación. No publiques configuración, estado ni logs sin sanear. Las cuotas y el almacenamiento visible no garantizan capacidad física, ausencia de cargos ni elegibilidad Always Free. Las notificaciones de escritorio son de mejor esfuerzo; consulta también el estado y los logs locales.
+
+Las revisiones manuales y sus límites se documentan en [reports/hourly-reviews.md](reports/hourly-reviews.md).

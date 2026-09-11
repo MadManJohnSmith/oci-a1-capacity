@@ -37,6 +37,11 @@ def retry_after_seconds(headers):
 
 
 CACHE = Path.home() / '.cache/oci-vm'
+CAPACITY_MIN_DELAY = 10
+CAPACITY_MAX_DELAY = 300
+TRANSIENT_DELAY = 300
+THROTTLE_MIN_DELAY = 30
+THROTTLE_MAX_DELAY = 600
 STOP = threading.Event()
 LOG = logging.getLogger('oci-vm')
 
@@ -139,9 +144,9 @@ def main():
     signal.signal(signal.SIGTERM, lambda *_: STOP.set())
     signal.signal(signal.SIGINT, lambda *_: STOP.set())
     try:
-        capacity_delay = int(os.environ.get('OCI_CAPACITY_DELAY', '60'))
-        if not 30 <= capacity_delay <= 300:
-            raise ValueError('OCI_CAPACITY_DELAY must be an integer from 30 to 300')
+        capacity_delay = int(os.environ.get('OCI_CAPACITY_DELAY', str(CAPACITY_MIN_DELAY)))
+        if not CAPACITY_MIN_DELAY <= capacity_delay <= CAPACITY_MAX_DELAY:
+            raise ValueError(f'OCI_CAPACITY_DELAY must be an integer from {CAPACITY_MIN_DELAY} to {CAPACITY_MAX_DELAY}')
         compute, block, network = clients()
         if args.check:
             volume, active = inspect(compute, block)
@@ -159,6 +164,11 @@ def main():
             state = json.loads(path.read_text()) if path.exists() else dict(token=uuid.uuid4().hex, token_created=time.time())
             if not isinstance(state.get('token'), str) or len(state['token']) != 32 or not isinstance(state.get('token_created'), (float, int)):
                 raise ValueError('Invalid persisted launch identity')
+            capacity_delay = int(state.get('capacity_delay_seconds', capacity_delay))
+            if not CAPACITY_MIN_DELAY <= capacity_delay <= CAPACITY_MAX_DELAY:
+                capacity_delay = CAPACITY_MIN_DELAY
+            state['capacity_delay_seconds'] = capacity_delay
+            state.setdefault('capacity_streak', 0)
             atomic(path, state)
             notified = False
             while not STOP.is_set():
@@ -182,8 +192,9 @@ def main():
 
                 retry_after = None
                 recovery = None
-                delay = 300
+                delay = TRANSIENT_DELAY
                 permanent = False
+                category = 'unknown'
                 try:
                     volume, active = inspect(compute, block, call)
                     ids = {a.instance_id for a in active}
@@ -226,11 +237,18 @@ def main():
                         state['throttle_streak'] = state.get('throttle_streak', 0) + 1
                         state.setdefault('throttle_started_epoch', started_epoch)
                         retry_after = retry_after_seconds(exc.headers)
-                        delay = max(min(600, 30 * 2 ** min(state['throttle_streak'] - 1, 5)), retry_after or 0)
+                        delay = max(min(THROTTLE_MAX_DELAY, THROTTLE_MIN_DELAY * 2 ** min(state['throttle_streak'] - 1, 5)), retry_after or 0)
+                        category = 'throttled'
                         result = dict(result='throttled', http_status=429)
                     elif exc.status == 500 and exc.code == 'InternalError' and 'out of host capacity' in exc.message.lower():
+                        state['capacity_streak'] = state.get('capacity_streak', 0) + 1
+                        capacity_delay = min(CAPACITY_MAX_DELAY, max(CAPACITY_MIN_DELAY, capacity_delay + (10 if state['capacity_streak'] > 3 else 0)))
+                        state['capacity_delay_seconds'] = capacity_delay
+                        category = 'capacity'
                         result, delay = dict(result='capacity', http_status=500), capacity_delay
                     elif exc.status in (408, 500, 502, 503, 504):
+                        category = 'transient'
+                        delay = TRANSIENT_DELAY
                         result = dict(result='transient_service_error', http_status=exc.status)
                     else:
                         result, permanent = dict(result='permanent_service_error', http_status=exc.status), True
@@ -238,9 +256,17 @@ def main():
                     # Disk failures must not be retried as network failures.
                     if isinstance(exc, OSError):
                         raise
-                    result = dict(result='network_error', error_type=type(exc).__name__)
+                        category = 'network'
+                        delay = TRANSIENT_DELAY
+                        result = dict(result='network_error', error_type=type(exc).__name__)
                 except Exception as exc:
+                    category = 'permanent'
                     result, permanent = dict(result='permanent_error', error_type=type(exc).__name__), True
+
+                if result['result'] == 'accepted':
+                    state['capacity_streak'] = 0
+                    state['capacity_delay_seconds'] = CAPACITY_MIN_DELAY
+                    capacity_delay = CAPACITY_MIN_DELAY
                 if result['result'] in ('accepted', 'capacity'):
                     throttle_started = state.pop('throttle_started_epoch', None)
                     if throttle_started is not None:
@@ -251,7 +277,8 @@ def main():
                 atomic(path, state)
                 status = dict(result, attempt_started=started, last_result_time=stamp(), next_attempt=stamp(next_time) if next_time else None,
                               next_attempt_epoch=next_time, delay_seconds=None if permanent else delay,
-                              capacity_delay_seconds=capacity_delay, operations=operations,
+                              capacity_delay_seconds=capacity_delay, capacity_streak=state.get('capacity_streak', 0), response_category=category,
+                              operations=operations,
                               duration_seconds=round(time.time() - started_epoch, 3),
                               throttle_streak=state.get('throttle_streak', 0), retry_after_seconds=retry_after,
                               throttle_recovery_seconds=recovery)

@@ -54,13 +54,16 @@ if status_path.exists():
         assert abs(gap - status['delay_seconds']) < 1
         delay = status['delay_seconds']
         if status['result'] == 'capacity':
-            assert 30 <= delay <= 300
-            assert delay == status.get('capacity_delay_seconds', 300)
+            assert 10 <= delay <= 300
+            assert delay == status.get('capacity_delay_seconds', 10)
             assert status.get('throttle_streak', 0) == 0
+            if 'response_category' in status:
+                assert status['response_category'] == 'capacity'
         elif status['result'] == 'throttled' and 'throttle_streak' in status:
             streak = status['throttle_streak']
             assert streak >= 1
             assert delay == max(min(600, 30 * 2 ** min(streak - 1, 5)), status['retry_after_seconds'] or 0)
+            assert status.get('response_category') == 'throttled'
         else:
             assert delay >= 300
         if status['result'] == 'monitor':

@@ -80,3 +80,14 @@ Commit URL and remote SHA verification follow after committing and pushing this 
 - No OCI lifecycle mutation, resource creation/deletion, shutdown/reboot, workflow change, automation, mock, or unrelated code change occurred. This is report-only because no evidence-backed implementation defect was found. Public report contains no OCIDs, IPs, fingerprints, emails, credentials, personal paths, or raw logs.
 
 Commit URL and remote SHA verification follow after committing and pushing this report.
+
+
+## Round 8 — 2026-09-11
+
+- Baseline: 2026-09-11T07:56:22.660000Z. Evidence cutoff: 2026-09-11T08:56:24.239045Z. Actual observed interval: **3,601.579045 seconds (1h 00m 01.579045s)**. **One complete 3,600-second interval; one completed hourly review.**
+- Real read-only `local_runner.py --check` passed at 08:56:23Z: boot volume AVAILABLE, zero active attachments. Real `check_local.py` passed at 08:56:24Z with sanitized OCI SDK, timeout/no-retry assertions, and the actual 60-second scheduled-delay assertion. Local regression tests passed 10/10. No mock OCI checks were used.
+- The sequential authorized retry recorded **59 capacity results**, each launch HTTP 500, from 07:56:38Z through 08:56:01Z. Attempt durations were **0.923–3.079s (mean 1.426s)**; effective wait was **60s for every attempt**; `Retry-After` was absent on every result, throttle streak remained 0, and no transient, network, permanent, accepted, or recovery result occurred. No instance was created or attached. This interval contains **no measured 429**; the older legacy 429 records remain outside the baseline.
+- The authorized local retry process remains running under the sanitized OCI venv (`local_runner.py`, one process, sequential/no burst). `oci-vm.service` is not installed in this inspection environment (`LoadState=not-found`, inactive/dead, zero restarts); therefore no restart was performed and no cloud ExecStop could be invoked. The running process was left untouched. GitHub workflow listing was unavailable for the configured remote (HTTP 404), so disabled workflow state could not be independently re-verified in this environment; no workflow mutation was attempted.
+- No OCI lifecycle mutation, resource creation/deletion, shutdown/reboot, workflow change, automation, mock, or evidence-backed implementation change occurred. Report-only review. Public report contains no OCIDs, IPs, fingerprints, emails, credentials, personal paths, or raw logs.
+
+Commit URL and remote SHA verification follow after committing and pushing this report.

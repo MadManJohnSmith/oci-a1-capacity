@@ -34,3 +34,14 @@ Commit URL and completion timing are recorded in the private local review cache 
 - No evidence-backed code defect or unrelated change found. Report-only review. Workflow `capacity.yml` remains `disabled_manually`.
 
 Commit URL and completion timing are recorded in the private local review cache after push/remote-SHA verification.
+
+
+## Round 4 — 2026-09-11
+
+- Baseline: 2026-09-11T02:58:52Z. Evidence cutoff: 2026-09-11T04:56:12Z. Actual observed interval: **5,840 seconds (1h 37m 20s)**. One complete 3,600-second interval; **one completed hourly review**. The prior 3,416-second observation remains incomplete and is not combined or counted.
+- Real read-only `local_runner.py --check` passed at 04:55:57Z: boot volume AVAILABLE, zero active attachments. Real `check_local.py` passed at 04:55:57Z with sanitized OCI venv Python, SDK timeout/no-retry assertions and actual 300-second scheduled-delay assertion. No mock tests were used for OCI evidence; local regression tests separately passed 10/10 in the sanitized OCI venv.
+- A1 limits remain 2 cores and 12 GB available, zero used, at AD and regional scopes; no quota policies returned. Root-compartment/configured-AD storage inventory remains one AVAILABLE 200-GB boot volume and zero block volumes; free-storage and total-storage limits remain 200 GB used, zero GB remaining. These limits are not billing proof or an Always Free guarantee.
+- The authorized local retry remains running as the OCI venv `local_runner.py` process, with recent real capacity results and the latest status capacity/HTTP 500; no accepted launch, instance attachment or success/SSH path exists. The named `oci-vm.service` is not installed/active in the current inspection environment, so no restart was performed and no cloud ExecStop could be invoked or proven; the runner process was left untouched.
+- GitHub API verified the sole workflow remains `capacity.yml`, state `disabled_manually`. No OCI lifecycle mutation, resource creation/deletion, restart, shutdown/reboot, workflow change, automation, or extra resource occurred. No evidence-backed code change was found; report-only review.
+
+Commit URL and completion timing are recorded in the private local review cache after push/remote-SHA verification.

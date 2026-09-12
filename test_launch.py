@@ -85,6 +85,17 @@ class LaunchTests(unittest.TestCase):
             self.attempt()
         self.compute.launch_instance.assert_not_called()
 
+    def test_invalid_resources_rejected(self):
+        with patch.dict("os.environ", {"OCI_OCPUS": "4", "OCI_MEMORY_GB": "1"}):
+            with self.assertRaises(ValueError):
+                self.attempt()
+        self.compute.launch_instance.assert_not_called()
+
+    def test_invalid_repository_rejected(self):
+        with self.assertRaises(ValueError):
+            launch.repository_name("owner/repo\nmalicious")
+        self.compute.launch_instance.assert_not_called()
+
     def test_config_replaces_local_key_path(self):
         config = (f"[DEFAULT]\ntenancy={launch.TENANCY}\n"
                   "user=user\nfingerprint=fingerprint\nkey_file=/missing/key.pem\n")

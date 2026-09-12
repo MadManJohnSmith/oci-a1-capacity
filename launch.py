@@ -4,6 +4,7 @@ import configparser
 import hashlib
 import os
 from pathlib import Path
+import re
 import tempfile
 
 import oci
@@ -13,6 +14,28 @@ TENANCY = "ocid1.tenancy.oc1..aaaaaaaahpe236ucfim2ul4qkjhwuvzlwleqnfoyuph776dkeg
 BOOT = "ocid1.bootvolume.oc1.mx-queretaro-1.abyxeljrxa4tblkmxejfzwkqqfpoas32kbvcj5uu7xj3acrgmbk4zo6bykmq"
 SUBNET = "ocid1.subnet.oc1.mx-queretaro-1.aaaaaaaarhz263nmblwfoel4erqdiki5nnvfrkow64yogoqy3fglkcajcokq"
 AD = "KsWN:MX-QUERETARO-1-AD-1"
+REPOSITORY_RE = re.compile(r'^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+
+
+def valid_ocid(value):
+    return isinstance(value, str) and bool(re.fullmatch(r'ocid1\.[a-z0-9-]+\.[a-z0-9-]+\.[A-Za-z0-9._-]+', value))
+
+
+def repository_name(value):
+    if not isinstance(value, str) or not REPOSITORY_RE.fullmatch(value) or any(ord(c) < 32 for c in value):
+        raise ValueError('Repository must be owner/name')
+    return value.lower()
+
+
+def resource_config():
+    try:
+        ocpus = int(os.environ.get('OCI_OCPUS', '2'))
+        memory_gb = int(os.environ.get('OCI_MEMORY_GB', '12'))
+    except ValueError as exc:
+        raise ValueError('OCI_OCPUS and OCI_MEMORY_GB must be integers') from exc
+    if not 1 <= ocpus <= 4 or not 1 <= memory_gb <= 24 or memory_gb < ocpus * 6 or memory_gb > ocpus * 12:
+        raise ValueError('Invalid A1 Flex resource combination')
+    return ocpus, memory_gb
 
 
 def attempt(compute, block, repository, check=False):
@@ -31,15 +54,17 @@ def attempt(compute, block, repository, check=False):
         return "unavailable"
     if check:
         return "ready"
-    token = hashlib.sha256(f"{repository.lower()}:{BOOT}".encode()).hexdigest()
+    repository = repository_name(repository)
+    token = hashlib.sha256(f"{repository}:{BOOT}".encode()).hexdigest()
+    ocpus, memory_gb = resource_config()
     details = oci.core.models.LaunchInstanceDetails(
         availability_domain=AD,
         compartment_id=volume.compartment_id,
         display_name="oci-a1-capacity",
         shape="VM.Standard.A1.Flex",
         shape_config=oci.core.models.LaunchInstanceShapeConfigDetails(
-            ocpus=int(os.environ.get("OCI_OCPUS", "2")),
-            memory_in_gbs=int(os.environ.get("OCI_MEMORY_GB", "12")),
+            ocpus=ocpus,
+            memory_in_gbs=memory_gb,
         ),
         source_details=oci.core.models.InstanceSourceViaBootVolumeDetails(
             boot_volume_id=BOOT,
@@ -66,8 +91,7 @@ def main():
     args = parser.parse_args()
     try:
         repository = os.environ.get("GITHUB_REPOSITORY") or os.environ["OCI_REPOSITORY"]
-        if len(repository.split("/")) != 2 or not all(repository.split("/")):
-            raise ValueError("Repository must be owner/name")
+        repository = repository_name(repository)
         with tempfile.TemporaryDirectory(prefix="oci-a1-") as directory:
             config_path = Path(directory) / "config"
             key_path = Path(directory) / "key.pem"

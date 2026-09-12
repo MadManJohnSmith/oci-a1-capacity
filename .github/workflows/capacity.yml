@@ -52,6 +52,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sleep 540
+          set -eu
           gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" \
             -f event_type=retry

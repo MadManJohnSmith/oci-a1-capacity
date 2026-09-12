@@ -39,7 +39,14 @@ class RunnerTests(unittest.TestCase):
             mock_urlopen.assert_called_once()
             req = mock_urlopen.call_args[0][0]
             self.assertEqual(req.full_url, 'https://example.com/hook')
-            self.assertEqual(req.data, b'test-alert')
+            self.assertEqual(req.data, b'{"text": "test-alert"}')
+
+    @patch('urllib.request.urlopen')
+    @patch('subprocess.run')
+    def test_notify_rejects_insecure_webhook(self, mock_subproc, mock_urlopen):
+        with patch.dict('os.environ', {'OCI_NOTIFY_WEBHOOK': 'http://example.com/hook'}, clear=True):
+            local_runner.notify('test-alert')
+            mock_urlopen.assert_not_called()
 
     @patch('urllib.request.urlopen')
     @patch('subprocess.run')
@@ -64,12 +71,12 @@ class RunnerTests(unittest.TestCase):
                 block.get_boot_volume.side_effect = oci.exceptions.RequestException(Exception("connection failed"))
 
                 exit_code = local_runner.main()
-                self.assertEqual(exit_code, 0)
+                self.assertEqual(exit_code, 2)
                 status_file = cache_path / 'status.json'
                 self.assertTrue(status_file.exists())
                 status = json.loads(status_file.read_text())
-                self.assertEqual(status['result'], 'network_error')
-                self.assertEqual(status['response_category'], 'network')
+                self.assertEqual(status['result'], 'reconcile_required')
+                self.assertEqual(status['response_category'], 'ambiguous')
 
     @patch('local_runner.clients')
     def test_token_rotation_when_idle(self, mock_clients):
@@ -130,8 +137,8 @@ class RunnerTests(unittest.TestCase):
                     self.assertEqual(exit_code, 2)
                     status_file = cache_path / 'status.json'
                     status = json.loads(status_file.read_text())
-                    self.assertEqual(status['result'], 'permanent_error')
-                    self.assertEqual(status['error_type'], 'ValueError')
+                    self.assertEqual(status['result'], 'reconcile_required')
+                    self.assertEqual(status['response_category'], 'reconcile_required')
 
     def test_status_flag_when_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:

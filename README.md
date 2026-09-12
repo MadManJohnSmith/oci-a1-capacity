@@ -11,7 +11,7 @@ Cuando decidas publicar estos archivos en GitHub, crea dos secretos del reposito
 
 La identidad necesita permisos para leer el volumen y sus attachments, crear la instancia desde ese volumen y utilizar la subred/VNIC. Los secretos se escriben temporalmente con permisos `0600` y se eliminan al salir; no se imprimen mensajes ni cuerpos de errores del SDK.
 
-El workflow se ejecuta cada 10 minutos y manualmente; GitHub puede retrasar u omitir ejecuciones programadas, que requieren el workflow en la rama predeterminada. La concurrencia serializa ejecuciones de este workflow en el mismo repositorio. Tras una respuesta satisfactoria de lanzamiento, se deshabilita mediante `gh api`, usando `github.token` con `actions: write`. Esto confirma aceptación, no que la instancia ya esté `RUNNING`. Un fallo al deshabilitar marca la ejecución como fallida; los siguientes intentos vuelven a comprobar el volumen.
+El workflow se ejecuta de forma programada, manual y mediante `repository_dispatch` cuando corresponde; GitHub puede retrasar u omitir ejecuciones programadas, que requieren el workflow en la rama predeterminada. La concurrencia serializa ejecuciones en el mismo repositorio. Tras una respuesta satisfactoria de lanzamiento, se deshabilita mediante `gh api`, usando `github.token` con `actions: write`. Esto confirma aceptación, no que la instancia ya esté `RUNNING`. El workflow de pruebas (`Test`) no tiene secretos ni permisos de escritura.
 
 ## Ejecución local
 
@@ -29,8 +29,9 @@ python -m unittest discover -v
 ## Seguridad y límites
 
 - Consulta todos los attachments del volumen y omite el lanzamiento si alguno no está `DETACHED` o el volumen no está `AVAILABLE`.
-- Hace una sola llamada de lanzamiento, sin reintentos internos. El token determinista SHA-256 combina repositorio y volumen: los intentos tras respuestas ambiguas reutilizan el mismo token. No cambies ese identificador ni ejecutes copias concurrentes desde otros repositorios o equipos.
-- OCI caduca tokens a las 24 horas y puede invalidarlos antes. Las comprobaciones no son un bloqueo atómico; no se garantiza exclusión global frente a otros actores ni idempotencia indefinida.
+- Hace una sola llamada de lanzamiento, sin reintentos internos. El monitor conserva `launch_pending` ante timeouts o errores ambiguos y se detiene para reconciliar antes de volver a crear; no borres ese estado ni renueves el token a ciegas.
+- El token determinista SHA-256 combina repositorio y volumen en `launch.py`; el monitor local conserva un token persistente. OCI caduca tokens a las 24 horas y puede invalidarlos antes. Las comprobaciones no son un bloqueo atómico ni excluyen otros equipos.
+- `OCI_OCPUS` y `OCI_MEMORY_GB` se validan como una combinación Flex de 1–4 OCPU y 6–12 GB por OCPU, hasta 24 GB. `OCI_ENABLE_SSH_PROBE=true` es opt-in y solo prueba IPs públicas globales.
 - Solo `500 InternalError` con `Out of host capacity` se trata como falta de capacidad normal. Autenticación, configuración, cuotas, errores de red y otros fallos producen salida no cero sin revelar detalles sensibles.
 - La elegibilidad **Always Free no está garantizada**: verifica tu cuenta, región principal, cuotas y consumos de cómputo, almacenamiento y red. GitHub Actions consume minutos y puede generar costes según el plan.
 

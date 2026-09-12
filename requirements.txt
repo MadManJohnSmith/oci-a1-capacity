@@ -1,1 +1,2 @@
+# Pin the OCI SDK; review upgrades in CI before changing this version.
 oci==2.185.2

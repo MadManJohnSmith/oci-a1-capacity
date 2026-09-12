@@ -6,11 +6,23 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h/oci-a1-capacity
-Environment="PATH=%h/venvs/oci-official/bin:/usr/bin"
-Environment="PYTHONUNBUFFERED=1"
 ExecStart=%h/oci-a1-capacity/run.sh local_runner.py
+Environment=PYTHONUNBUFFERED=1
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.cache/oci-vm
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
 Restart=on-failure
+RestartPreventExitStatus=2
 RestartSec=30
+StartLimitIntervalSec=1h
+StartLimitBurst=20
 
 [Install]
 WantedBy=default.target

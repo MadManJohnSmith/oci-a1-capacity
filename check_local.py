@@ -113,16 +113,20 @@ if '--markdown' in sys.argv:
                             durations.append(payload['duration_seconds'])
                 except Exception:
                     pass
-    dur_str = f"{min(durations):.3f}–{max(durations):.3f} seconds" if durations else "1.500–3.500 seconds"
-    sched_delay = report.get('verified_scheduled_delay_seconds', 60)
+    dur_str = f"{min(durations):.3f}–{max(durations):.3f} seconds" if durations else "no parsed attempts"
+    sched_delay = report.get('verified_scheduled_delay_seconds')
+    active = report.get('attachment_count')
+    storage = report.get('boot_volumes', [])
+    markdown_attempts = f"{attempts} parsed attempts" if attempts else "no parsed attempts"
+    markdown_delay = f"{sched_delay:g} seconds" if isinstance(sched_delay, (int, float)) else "not verified"
 
-    md = f"""## Persistent cycle review — {now_stamp[:10]}{'' if complete else ' (incomplete)'}
+    md = f"""## Local OCI review — {now_stamp[:10]}{'' if complete else ' (incomplete)'}
 
-- Baseline: {baseline or 'N/A'}. Evidence cutoff: {now_stamp}. Actual observed interval: **{interval_sec:,.6f} seconds**. {complete_str}
-- Real read-only `local_runner.py --check` passed: boot volume {report.get('boot_state')}, zero active attachments. Real `check_local.py` passed with configured OCI SDK timeout/no-retry checks and verified {sched_delay}-second scheduled delay. No mocks were used.
-- The sequential runner process remained active (one process, no burst). The interval contained **{attempts} capacity results**, each launch HTTP 500. Request durations were **{dur_str}**; effective wait was **{sched_delay} seconds**; `Retry-After` was absent; no 429, network, transient, permanent, accepted, or recovery result was observed. No instance was created or attached.
-- Current OCI state: boot volume {report.get('boot_state')}, zero active attachments; A1 availability is {report.get('requested_ocpus', 2)} OCPU and {report.get('requested_memory_gb', 12)} GB; configured storage inventory is one 200-GB boot volume and no block volumes. These observations are not billing proof or an Always Free guarantee.
-- `oci-vm.service` status verified. No cloud mutation or resource creation occurred. Public report contains no OCIDs, IPs, fingerprints, credentials, or raw logs.
+- Baseline: {baseline or 'not available'}. Evidence cutoff: {now_stamp}. Observed interval: **{interval_sec:,.6f} seconds**. {complete_str}
+- Read-only OCI check: boot volume state **{report.get('boot_state', 'unknown')}**, active attachment count **{active if active is not None else 'unknown'}**, and scheduled delay **{markdown_delay}**. No launch operation is performed by this report command.
+- Local log summary: **{markdown_attempts}**; parsed duration range **{dur_str}**. The report does not infer unobserved response categories or claim that no instance exists outside the queried attachment set.
+- Quota/storage observations: compute and storage values are copied from the current assessment when available; they are not billing proof, capacity proof, or an Always Free guarantee.
+- This is a draft generated from local state and read-only OCI results. Review it before publishing and remove identifiers or operational details that should remain private.
 """
     print(md)
 else:

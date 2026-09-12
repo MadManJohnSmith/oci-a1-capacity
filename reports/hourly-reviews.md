@@ -186,3 +186,12 @@ Commit URL and remote SHA verification follow after committing and pushing this 
 - Current OCI state: boot volume AVAILABLE, zero active attachments; A1 availability remains 2 OCPU and 12 GB at the checked scopes; storage inventory remains one 200-GB boot volume and no block volumes.
 - `oci-vm.service` is not installed or visible (`systemctl cat` reported no files). The runner process is no longer running after the token safety stop; no restart was attempted because reconciliation is required before safely rotating/reusing launch identity. GitHub Actions workflow listing returned no entries; no workflow was enabled or dispatched.
 - Pre-existing local changes remain untouched and unstaged. No OCI lifecycle mutation, resource creation/deletion, automation, mock, or code change was made. The public report contains no OCIDs, IPs, fingerprints, emails, credentials, personal paths, or raw logs.
+
+## Persistent cycle review — 2026-09-12
+
+- Baseline: 2026-09-12T00:01:16.417905Z. Evidence cutoff: 2026-09-12T01:01:28.004351Z. Actual observed interval: **3,611.586446 seconds**. This exceeds 3,600 seconds and is counted as one complete non-overlapping review window.
+- Real read-only `local_runner.py --check` passed at 01:01:27Z: boot volume AVAILABLE and zero active attachments. Real `check_local.py` passed at 01:01:28Z with the configured OCI SDK timeout/no-retry checks. No mocks were used.
+- The runner remained stopped for the entire interval after the previously recorded 23-hour token-safety `ValueError`. Therefore the interval contains **0 requests and 0 attempts**; capacity, 429, network, transient, accepted and recovery counts are all zero, and no request duration, wait or Retry-After exists to report.
+- Current OCI state: boot volume AVAILABLE, zero active attachments; A1 availability remains 2 OCPU and 12 GB at the checked scopes; storage inventory remains one 200-GB boot volume and no block volumes. No instance was created or attached.
+- `oci-vm.service` is not installed or visible (`systemctl cat` reported no files). The runner process was not running and was not restarted because launch identity reconciliation is required. GitHub Actions workflow listing returned no entries; no workflow was enabled or dispatched.
+- Pre-existing local changes remain untouched and unstaged. No OCI lifecycle mutation, resource creation/deletion, automation, mock, or code change was made. The public report contains no OCIDs, IPs, fingerprints, emails, credentials, personal paths, or raw logs.

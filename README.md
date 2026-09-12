@@ -68,6 +68,15 @@ Los valores estructurales están definidos en `launch.py`. La configuración sol
 
 **Configuración solicitada no significa instancia creada.** Comprueba siempre `--check`, `--status`, los attachments de OCI y el estado de la instancia. El último estado conocido del proyecto puede seguir siendo `capacity` sin instancia creada.
 
+## Diagramas
+
+Se entregan dos diagramas standalone con SVG inline, temas claro/oscuro, búsqueda y exportación desde el visor:
+
+- [Arquitectura del sistema](oci-a1-architecture.html) — componentes locales, OCI, estado y límites de seguridad.
+- [Flujo seguro de lanzamiento](oci-a1-flow.html) — comprobación, capacidad, aceptación y reconciliación de solicitudes ambiguas.
+
+Las especificaciones editables son `oci-a1-architecture.json` y `oci-a1-flow.json`. Se validan con Archify en perfil `showcase`. El diagrama de arquitectura también pasó la comprobación automatizada de navegador; el flujo pasó validación semántica y de composición, pero su viewer puede requerir scroll vertical en algunos escritorios por el panel de tarjetas.
+
 ## Arquitectura
 
 ```text

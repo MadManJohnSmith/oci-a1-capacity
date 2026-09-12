@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "OCI A1 Capacity Runner — Arquitectura",
+    "quality_profile": "showcase",
+    "output": "oci-a1-architecture.html"
+  },
+  "components": [
+    { "id": "operator", "type": "external", "label": "Operador", "sublabel": "CLI + decisiones", "pos": [40, 260], "size": [150, 72] },
+    { "id": "github", "type": "cloud", "label": "GitHub Actions", "sublabel": "capacity.yml + ci.yml", "pos": [40, 430], "size": [150, 72] },
+    { "id": "launch", "type": "backend", "label": "launch.py", "sublabel": "one-shot + --check", "pos": [260, 180], "size": [170, 72] },
+    { "id": "runner", "type": "backend", "label": "local_runner.py", "sublabel": "monitor persistente", "pos": [260, 330], "size": [170, 72] },
+    { "id": "assessment", "type": "backend", "label": "check_local.py", "sublabel": "assessment read-only", "pos": [260, 480], "size": [170, 72] },
+    { "id": "state", "type": "database", "label": "Estado local", "sublabel": "token · pending · status · log", "pos": [500, 330], "size": [190, 72] },
+    { "id": "oci_compute", "type": "cloud", "label": "OCI Compute", "sublabel": "launch · attachments · instances", "pos": [790, 180], "size": [190, 72] },
+    { "id": "oci_storage", "type": "cloud", "label": "OCI Block Storage", "sublabel": "boot volume", "pos": [790, 330], "size": [190, 72] },
+    { "id": "oci_network", "type": "cloud", "label": "OCI VCN", "sublabel": "subnet · VNIC", "pos": [790, 480], "size": [190, 72] },
+    { "id": "security", "type": "security", "label": "Controles de seguridad", "sublabel": "tokens · reconciliación · mínimo privilegio", "pos": [500, 500], "size": [190, 72] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Repositorio / host local", "wraps": ["operator", "github", "launch", "runner", "assessment", "state", "security"] },
+    { "kind": "security-group", "label": "Tenancy OCI · mx-queretaro-1", "wraps": ["oci_compute", "oci_storage", "oci_network"] }
+  ],
+  "connections": [
+    { "id": "operator-launch", "from": "operator", "to": "launch", "label": "CLI", "variant": "emphasis", "labelDy": -50 },
+    { "id": "launch-compute", "from": "launch", "to": "oci_compute", "label": "launch_instance", "variant": "emphasis" },
+    { "id": "runner-compute", "from": "runner", "to": "oci_compute", "label": "attachments · reconcile", "variant": "emphasis" },
+    { "id": "security-runner", "from": "security", "to": "runner", "label": "fail closed", "variant": "security", "labelDx": -70, "labelDy": 24 }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Principio operativo", "items": ["Una sola llamada de lanzamiento por ciclo", "El estado ambiguo detiene antes de duplicar recursos", "Las comprobaciones --check no mutan OCI"] },
+    { "dot": "cyan", "title": "Superficie controlada", "items": ["Los secretos solo viven durante la ejecución", "SSH está desactivado por defecto", "El servicio local limita permisos y filesystem"] }
+  ]
+}

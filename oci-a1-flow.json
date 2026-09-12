@@ -1,0 +1,52 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "OCI A1 Capacity Runner — Flujo seguro",
+    "quality_profile": "showcase",
+    "viewBox": [1000, 720],
+    "output": "oci-a1-flow.html"
+  },
+  "lanes": [
+    { "id": "operator", "label": "Operador + runner" },
+    { "id": "oci", "label": "OCI + seguridad" },
+    { "id": "runner", "label": "Decisión y reconciliación", "variant": "exception" }
+  ],
+  "phases": [
+    { "id": "prepare", "label": "Preparar", "fromCol": 0, "toCol": 1 },
+    { "id": "inspect", "label": "Inspeccionar", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "decide", "label": "Decidir", "fromCol": 4, "toCol": 4 },
+    { "id": "recover", "label": "Reintentar o detener", "fromCol": 5, "toCol": 5, "variant": "security" }
+  ],
+  "groups": [
+    { "id": "safe_launch", "label": "Solo una solicitud idempotente", "lane": "runner", "fromCol": 3, "toCol": 5, "variant": "emphasis" },
+    { "id": "ambiguous_branch", "label": "No duplicar ante ambigüedad", "lane": "runner", "fromCol": 3, "toCol": 5, "variant": "security" }
+  ],
+  "mainPath": ["start", "lock", "inspect", "pending", "volume"],
+  "nodes": [
+    { "id": "start", "lane": "operator", "col": 0, "type": "external", "label": "Iniciar ciclo", "sublabel": "systemd / CLI" },
+    { "id": "lock", "lane": "runner", "col": 1, "type": "security", "label": "Adquirir lock", "sublabel": "un proceso local" },
+    { "id": "inspect", "lane": "oci", "col": 2, "type": "cloud", "label": "Leer OCI", "sublabel": "volume + attachments" },
+    { "id": "pending", "lane": "oci", "col": 3, "type": "security", "label": "¿Pendiente?", "sublabel": "launch_pending" },
+    { "id": "volume", "lane": "oci", "col": 4, "type": "cloud", "label": "¿Disponible?", "sublabel": "AVAILABLE + detached" },
+    { "id": "launch", "lane": "runner", "col": 3, "type": "backend", "label": "Lanzar una vez", "sublabel": "token estable" },
+    { "id": "accepted", "lane": "operator", "col": 5, "type": "cloud", "label": "Aceptado", "sublabel": "instance OCID" },
+    { "id": "monitor", "lane": "runner", "col": 5, "type": "backend", "label": "Monitorizar", "sublabel": "solo observa" },
+    { "id": "capacity", "lane": "oci", "col": 5, "type": "messagebus", "label": "Sin capacidad", "sublabel": "500 InternalError" },
+    { "id": "reconcile", "lane": "runner", "col": 4, "type": "security", "label": "Reconciliar", "sublabel": "buscar attachment" }
+  ],
+  "edges": [
+    { "from": "start", "to": "lock", "label": "ejecuta" },
+    { "from": "lock", "to": "inspect", "label": "consulta" },
+    { "from": "inspect", "to": "pending", "label": "estado persistido", "variant": "security" },
+    { "from": "pending", "to": "volume", "label": "no", "variant": "emphasis" },
+    { "from": "launch", "to": "accepted", "label": "respuesta OCI", "variant": "emphasis" },
+    { "from": "accepted", "to": "monitor", "label": "guardar OCID", "variant": "emphasis" },
+    { "from": "launch", "to": "capacity", "label": "host capacity", "variant": "dashed" },
+    { "from": "launch", "to": "pending", "label": "timeout / red", "variant": "security", "role": "error" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Regla crítica", "items": ["Un error ambiguo no limpia launch_pending", "Nunca se renueva el token mientras hay una solicitud pendiente", "Se reconcilia antes de volver a crear"] },
+    { "dot": "emerald", "title": "Resultados seguros", "items": ["capacity: espera y vuelve a comprobar", "accepted: guarda la instancia y monitoriza", "reconcile_required: detiene para revisión humana"] }
+  ]
+}

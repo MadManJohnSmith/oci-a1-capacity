@@ -38,7 +38,8 @@ def attempt(compute, block, repository, check=False):
         display_name="oci-a1-capacity",
         shape="VM.Standard.A1.Flex",
         shape_config=oci.core.models.LaunchInstanceShapeConfigDetails(
-            ocpus=2, memory_in_gbs=12,
+            ocpus=int(os.environ.get("OCI_OCPUS", "2")),
+            memory_in_gbs=int(os.environ.get("OCI_MEMORY_GB", "12")),
         ),
         source_details=oci.core.models.InstanceSourceViaBootVolumeDetails(
             boot_volume_id=BOOT,

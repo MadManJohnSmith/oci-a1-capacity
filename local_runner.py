@@ -6,6 +6,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
+import random
 import signal
 import socket
 import subprocess
@@ -75,6 +76,17 @@ def notify(text):
         LOG.info('Desktop notification delivered')
     except (OSError, subprocess.SubprocessError) as exc:
         LOG.warning('Desktop notification unavailable (%s); %s', type(exc).__name__, text)
+    url = os.environ.get('OCI_NOTIFY_WEBHOOK')
+    if url:
+        # ponytail: plaintext webhook payload; add json/custom templates when specific services require it.
+        try:
+            import urllib.request
+            req = urllib.request.Request(url, data=text.encode('utf-8'),
+                                         headers={'Content-Type': 'text/plain; charset=utf-8'})
+            with urllib.request.urlopen(req, timeout=5):
+                LOG.info('Webhook notification delivered')
+        except Exception as exc:
+            LOG.warning('Webhook notification unavailable (%s); %s', type(exc).__name__, text)
 
 
 def clients():
@@ -135,7 +147,28 @@ def monitor(compute, network, instance_id, call=direct):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--check', action='store_true')
+    parser.add_argument('--status', action='store_true')
     args = parser.parse_args()
+    if args.status:
+        path = CACHE / 'status.json'
+        if not path.exists():
+            print('No status available (runner has not executed).')
+            return 0
+        try:
+            status = json.loads(path.read_text())
+            res = status.get('result', 'unknown')
+            next_epoch = status.get('next_attempt_epoch')
+            now = time.time()
+            next_str = f"in {max(0, int(next_epoch - now))}s" if next_epoch else "stopped"
+            last_time = status.get('last_result_time', 'unknown')
+            streak = status.get('capacity_streak', 0)
+            delay = status.get('delay_seconds')
+            jitter = status.get('jitter_seconds', 0.0)
+            print(f"Status: {res} | Last: {last_time} | Next: {next_str} | Delay: {delay}s (jitter: {jitter:+.2f}s) | Streak: {streak}")
+            return 0
+        except Exception as exc:
+            print(f"Failed to read status: {type(exc).__name__}")
+            return 1
     os.umask(0o077)
     CACHE.mkdir(mode=0o700, parents=True, exist_ok=True)
     CACHE.chmod(0o700)
@@ -147,6 +180,9 @@ def main():
         capacity_delay = int(os.environ.get('OCI_CAPACITY_DELAY', str(CAPACITY_MIN_DELAY)))
         if not CAPACITY_MIN_DELAY <= capacity_delay <= CAPACITY_MAX_DELAY:
             raise ValueError(f'OCI_CAPACITY_DELAY must be an integer from {CAPACITY_MIN_DELAY} to {CAPACITY_MAX_DELAY}')
+        capacity_max_delay = int(os.environ.get('OCI_CAPACITY_MAX_DELAY', str(CAPACITY_MAX_DELAY)))
+        if not CAPACITY_MIN_DELAY <= capacity_max_delay <= CAPACITY_MAX_DELAY:
+            capacity_max_delay = CAPACITY_MAX_DELAY
         compute, block, network = clients()
         if args.check:
             volume, active = inspect(compute, block)
@@ -213,13 +249,20 @@ def main():
                     elif STOP.is_set():
                         break
                     else:
-                        # ponytail: token safety capped at 23 hours; operator reconciliation required beyond that.
+                        # ponytail: token rotated at 23h when volume is provably detached and idle; operator reconciliation needed if pending.
                         if time.time() - state['token_created'] >= 23*3600:
-                            raise ValueError('Token safety window expired; reconcile before retry')
+                            if state.get('launch_pending'):
+                                raise ValueError('Launch pending across token expiry; reconcile before retry')
+                            state['token'] = uuid.uuid4().hex
+                            state['token_created'] = time.time()
+                            atomic(path, state)
+                            LOG.info('Rotated launch token after 23h idle safety window')
+                        ocpus = int(os.environ.get('OCI_OCPUS', '2'))
+                        memory_gb = int(os.environ.get('OCI_MEMORY_GB', '12'))
                         details = oci.core.models.LaunchInstanceDetails(
                             availability_domain=AD, compartment_id=volume.compartment_id,
                             display_name='oci-a1', shape='VM.Standard.A1.Flex',
-                            shape_config=oci.core.models.LaunchInstanceShapeConfigDetails(ocpus=2, memory_in_gbs=12),
+                            shape_config=oci.core.models.LaunchInstanceShapeConfigDetails(ocpus=ocpus, memory_in_gbs=memory_gb),
                             source_details=oci.core.models.InstanceSourceViaBootVolumeDetails(boot_volume_id=BOOT),
                             create_vnic_details=oci.core.models.CreateVnicDetails(subnet_id=SUBNET, assign_public_ip=True))
                         state['launch_pending'] = True
@@ -233,6 +276,7 @@ def main():
                         atomic(path, state)
                         result = dict(result='accepted', instance_id=state['instance_id'], instance_state=response.data.lifecycle_state)
                 except oci.exceptions.ServiceError as exc:
+                    state['launch_pending'] = False
                     if exc.status == 429:
                         state['throttle_streak'] = state.get('throttle_streak', 0) + 1
                         state.setdefault('throttle_started_epoch', started_epoch)
@@ -242,7 +286,7 @@ def main():
                         result = dict(result='throttled', http_status=429)
                     elif exc.status == 500 and exc.code == 'InternalError' and 'out of host capacity' in exc.message.lower():
                         state['capacity_streak'] = state.get('capacity_streak', 0) + 1
-                        capacity_delay = min(CAPACITY_MAX_DELAY, max(CAPACITY_MIN_DELAY, capacity_delay + (10 if state['capacity_streak'] > 3 else 0)))
+                        capacity_delay = min(capacity_max_delay, max(CAPACITY_MIN_DELAY, capacity_delay + (10 if state['capacity_streak'] > 3 else 0)))
                         state['capacity_delay_seconds'] = capacity_delay
                         category = 'capacity'
                         result, delay = dict(result='capacity', http_status=500), capacity_delay
@@ -254,11 +298,11 @@ def main():
                         result, permanent = dict(result='permanent_service_error', http_status=exc.status), True
                 except (oci.exceptions.RequestException, OSError) as exc:
                     # Disk failures must not be retried as network failures.
-                    if isinstance(exc, OSError):
+                    if isinstance(exc, OSError) and not isinstance(exc, oci.exceptions.RequestException):
                         raise
-                        category = 'network'
-                        delay = TRANSIENT_DELAY
-                        result = dict(result='network_error', error_type=type(exc).__name__)
+                    category = 'network'
+                    delay = TRANSIENT_DELAY
+                    result = dict(result='network_error', error_type=type(exc).__name__)
                 except Exception as exc:
                     category = 'permanent'
                     result, permanent = dict(result='permanent_error', error_type=type(exc).__name__), True
@@ -272,11 +316,14 @@ def main():
                     if throttle_started is not None:
                         recovery = max(0, time.time() - throttle_started)
                     state['throttle_streak'] = 0
-                next_time = None if permanent else time.time() + delay
+                jitter = round(random.uniform(-min(3.0, delay * 0.1), min(3.0, delay * 0.1)), 2) if category == 'capacity' else 0.0
+                effective_delay = max(CAPACITY_MIN_DELAY, round(delay + jitter, 2)) if not permanent else None
+                next_time = None if permanent else time.time() + effective_delay
                 state['next_attempt_epoch'] = next_time
                 atomic(path, state)
                 status = dict(result, attempt_started=started, last_result_time=stamp(), next_attempt=stamp(next_time) if next_time else None,
-                              next_attempt_epoch=next_time, delay_seconds=None if permanent else delay,
+                              next_attempt_epoch=next_time, delay_seconds=None if permanent else effective_delay,
+                              base_delay_seconds=None if permanent else delay, jitter_seconds=jitter,
                               capacity_delay_seconds=capacity_delay, capacity_streak=state.get('capacity_streak', 0), response_category=category,
                               operations=operations,
                               duration_seconds=round(time.time() - started_epoch, 3),

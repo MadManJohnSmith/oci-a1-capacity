@@ -49,6 +49,6 @@ env -u PYTHONHOME -u PYTHONPATH -u __PYVENV_LAUNCHER__ "$OCI_VENV/bin/python" lo
 env -u PYTHONHOME -u PYTHONPATH -u __PYVENV_LAUNCHER__ "$OCI_VENV/bin/python" check_local.py
 ```
 
-Define `OCI_VENV` con el directorio de tu entorno ya instalado. El monitor inicializa su caché local; `check_local.py` requiere esa caché y guarda allí la evaluación. No publiques configuración, estado ni logs sin sanear. Las cuotas y el almacenamiento visible no garantizan capacidad física, ausencia de cargos ni elegibilidad Always Free. Las notificaciones de escritorio son de mejor esfuerzo; consulta también el estado y los logs locales.
+Define `OCI_VENV` con el directorio de tu entorno ya instalado. El monitor inicializa su caché local; `check_local.py` requiere esa caché y guarda allí la evaluación. Usa `local_runner.py --status` para consultar el estado sin acceder a OCI y `check_local.py --markdown` para generar un borrador de auditoría basado en el último corte y el log local; revísalo antes de publicarlo porque no sustituye la verificación humana. No publiques configuración, estado ni logs sin sanear. Las cuotas y el almacenamiento visible no garantizan capacidad física, ausencia de cargos ni elegibilidad Always Free. Las notificaciones de escritorio son de mejor esfuerzo; consulta también el estado y los logs locales.
 
 Las revisiones manuales y sus límites se documentan en [reports/hourly-reviews.md](reports/hourly-reviews.md).

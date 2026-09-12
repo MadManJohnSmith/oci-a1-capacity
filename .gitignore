@@ -1,5 +1,8 @@
 __pycache__/
+*.py[cod]
 .venv/
+.cache/
+.envrc
 .env
 .env.*
 *.pem
@@ -7,3 +10,4 @@ __pycache__/
 .oci/
 config
 oci_config*
+.zcode/

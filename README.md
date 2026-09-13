@@ -367,7 +367,7 @@ Para contribuir:
 
 ## Licencia
 
-Este repositorio no declara actualmente un archivo `LICENSE`. Antes de redistribuirlo o incorporarlo a otro proyecto, acuerda y añade una licencia explícita con los propietarios del código.
+Este proyecto se distribuye bajo la [licencia MIT](LICENSE).
 
 ## Estado operativo
 

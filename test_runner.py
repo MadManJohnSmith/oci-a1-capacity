@@ -173,6 +173,62 @@ class RunnerTests(unittest.TestCase):
                 self.assertIn('Streak: 5', printed)
 
     @patch('local_runner.clients')
+    def test_throttle_recovery_reported(self, mock_clients):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_path = Path(tmpdir)
+            with patch('local_runner.CACHE', cache_path), \
+                 patch('sys.argv', ['local_runner.py']), \
+                 patch('local_runner.STOP') as mock_stop:
+                mock_stop.is_set.side_effect = [False, True]
+                mock_stop.wait.return_value = False
+                compute, block, network = Mock(), Mock(), Mock()
+                compute.list_boot_volume_attachments.__name__ = 'list_boot_volume_attachments'
+                mock_clients.return_value = (compute, block, network)
+                volume = SimpleNamespace(availability_domain=local_runner.AD, compartment_id=local_runner.TENANCY, lifecycle_state='AVAILABLE')
+                block.get_boot_volume.return_value = SimpleNamespace(data=volume, status=200)
+                block.get_boot_volume.__name__ = 'get_boot_volume'
+                with patch('local_runner.oci.pagination.list_call_get_all_results') as mock_pages:
+                    mock_pages.return_value = SimpleNamespace(data=[], status=200)
+                    compute.launch_instance.__name__ = 'launch_instance'
+                    compute.launch_instance.side_effect = oci.exceptions.ServiceError(429, 'TooManyRequests', {'Retry-After': '45'}, 'throttled')
+                    self.assertEqual(local_runner.main(), 0)
+                    status = json.loads((cache_path / 'status.json').read_text())
+                    self.assertEqual(status['result'], 'throttled')
+                    self.assertEqual(status['retry_after_seconds'], 45)
+                    self.assertEqual(status['throttle_recovery_seconds'], 45)
+                    self.assertEqual(status['throttle_streak'], 1)
+                    self.assertTrue(42 <= status['delay_seconds'] <= 48)
+
+    @patch('local_runner.clients')
+    def test_throttle_streak_resets_after_capacity(self, mock_clients):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_path = Path(tmpdir)
+            with patch('local_runner.CACHE', cache_path), \
+                 patch('sys.argv', ['local_runner.py']), \
+                 patch('local_runner.STOP') as mock_stop:
+                mock_stop.is_set.side_effect = [False, False, True]
+                mock_stop.wait.return_value = False
+                compute, block, network = Mock(), Mock(), Mock()
+                compute.list_boot_volume_attachments.__name__ = 'list_boot_volume_attachments'
+                mock_clients.return_value = (compute, block, network)
+                volume = SimpleNamespace(availability_domain=local_runner.AD, compartment_id=local_runner.TENANCY, lifecycle_state='AVAILABLE')
+                block.get_boot_volume.return_value = SimpleNamespace(data=volume, status=200)
+                block.get_boot_volume.__name__ = 'get_boot_volume'
+                with patch('local_runner.oci.pagination.list_call_get_all_results') as mock_pages:
+                    mock_pages.return_value = SimpleNamespace(data=[], status=200)
+                    compute.launch_instance.__name__ = 'launch_instance'
+                    compute.launch_instance.side_effect = [
+                        oci.exceptions.ServiceError(429, 'TooManyRequests', {'Retry-After': '30'}, 'throttled'),
+                        oci.exceptions.ServiceError(500, 'InternalError', {}, 'Out of host capacity.'),
+                    ]
+                    self.assertEqual(local_runner.main(), 0)
+                    status = json.loads((cache_path / 'status.json').read_text())
+                    self.assertEqual(status['result'], 'capacity')
+                    self.assertEqual(status['throttle_streak'], 0)
+                    state = json.loads((cache_path / 'runner-state.json').read_text())
+                    self.assertEqual(state['throttle_streak'], 0)
+
+    @patch('local_runner.clients')
     def test_jitter_and_capacity_max_delay(self, mock_clients):
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_path = Path(tmpdir)

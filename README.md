@@ -290,7 +290,7 @@ No habilites el workflow de capacidad mientras el monitor local esté activo.
 2. Un resultado conocido de `500 InternalError` con `Out of host capacity` se trata como falta de capacidad.
 3. Un timeout o error de red después de preparar el lanzamiento se trata como ambiguo: se conserva `launch_pending` y se detiene para reconciliar.
 4. Si aparece un attachment válido, se guarda la instancia y se monitoriza; no se lanza una segunda instancia.
-5. Errores 429 respetan `Retry-After` con tope de 600 s y backoff exponencial.
+5. Errores 429 respetan `Retry-After` con tope de 600 s y backoff exponencial. La espera aplicada se reporta como `throttle_recovery_seconds` y la racha de throttling se reinicia tras cualquier intento no limitado.
 6. Los retardos incorporan jitter acotado para evitar sincronización entre clientes.
 7. El estado local se valida por tipo, tamaño, propietario, permisos y estructura básica.
 8. La sonda SSH está desactivada por defecto. No se registran banners ni IPs salvo que se habilite explícitamente.

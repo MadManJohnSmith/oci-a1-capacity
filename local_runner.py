@@ -318,6 +318,7 @@ def main():
                         state['throttle_streak'] = state.get('throttle_streak', 0) + 1
                         retry_after = retry_after_seconds(exc.headers)
                         delay = max(min(THROTTLE_MAX_DELAY, THROTTLE_MIN_DELAY * 2 ** min(state['throttle_streak'] - 1, 5)), retry_after or 0)
+                        recovery = delay
                         category, result = 'throttled', dict(result='throttled', http_status=429)
                     elif exc.status == 500 and exc.code == 'InternalError' and 'out of host capacity' in exc.message.lower():
                         state['launch_pending'] = False
@@ -336,6 +337,8 @@ def main():
                     raise
                 except Exception as exc:
                     category, result, permanent = 'permanent', dict(result='permanent_error', error_type=type(exc).__name__), True
+                if category != 'throttled' and state.get('throttle_streak'):
+                    state['throttle_streak'] = 0
                 jitter = round(random.uniform(-min(3.0, delay * 0.1), min(3.0, delay * 0.1)), 2) if not permanent else 0.0
                 effective_delay = max(CAPACITY_MIN_DELAY, round(delay + jitter, 2)) if not permanent else None
                 next_time = None if permanent else time.time() + effective_delay

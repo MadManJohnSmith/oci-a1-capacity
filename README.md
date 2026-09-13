@@ -371,4 +371,4 @@ Este repositorio no declara actualmente un archivo `LICENSE`. Antes de redistrib
 
 ## Estado operativo
 
-Los reportes históricos de `reports/hourly-reviews.md` son observaciones de ventanas concretas, no garantías actuales. Para conocer el estado real, usa las comprobaciones read-only y el estado local descritos arriba.
+El histórico de reportes horarios manuales se retiró del repositorio; sus observaciones de ventanas concretas no eran garantías actuales. Para conocer el estado real, usa `--status`, `--check` y `check_local.py` descritos arriba.

@@ -111,6 +111,46 @@ class LaunchTests(unittest.TestCase):
             self.assertEqual(launch.main(), 0)
             self.assertTrue(attempt.call_args.args[3])
 
+    def test_local_config_fallback_check(self):
+        env = {k: "" for k in ("OCI_CONFIG", "OCI_API_KEY", "GITHUB_REPOSITORY",
+                               "OCI_REPOSITORY", "GITHUB_OUTPUT")}
+        with patch.dict("os.environ", env), \
+                patch("launch.oci.config.from_file") as from_file, \
+                patch("launch.oci.config.validate_config"), \
+                patch("launch.oci.core.ComputeClient") as compute_client, \
+                patch("launch.oci.core.BlockstorageClient"), \
+                patch("launch.attempt", return_value="ready") as attempt, \
+                patch("sys.argv", ["launch.py", "--check"]), \
+                patch("builtins.print"):
+            from_file.return_value = {"tenancy": launch.TENANCY}
+            self.assertEqual(launch.main(), 0)
+            from_file.assert_called_once_with()
+            self.assertIsNone(attempt.call_args.args[2])
+            self.assertTrue(attempt.call_args.args[3])
+            self.assertEqual(compute_client.call_args.args[0]["region"], launch.REGION)
+
+    def test_local_launch_uses_stable_repository(self):
+        env = {k: "" for k in ("OCI_CONFIG", "OCI_API_KEY", "GITHUB_REPOSITORY",
+                               "OCI_REPOSITORY", "GITHUB_OUTPUT")}
+        with patch.dict("os.environ", env), \
+                patch("launch.oci.config.from_file") as from_file, \
+                patch("launch.oci.config.validate_config"), \
+                patch("launch.oci.core.ComputeClient"), \
+                patch("launch.oci.core.BlockstorageClient"), \
+                patch("launch.attempt", return_value="launched") as attempt, \
+                patch("sys.argv", ["launch.py"]), \
+                patch("builtins.print"):
+            from_file.return_value = {"tenancy": launch.TENANCY}
+            self.assertEqual(launch.main(), 0)
+            self.assertEqual(attempt.call_args.args[2], "local/oci-a1-capacity")
+
+    def test_partial_secrets_rejected(self):
+        with patch.dict("os.environ", {"OCI_CONFIG": "[DEFAULT]"}), \
+                patch("sys.argv", ["launch.py", "--check"]), \
+                patch("builtins.print") as output:
+            self.assertEqual(launch.main(), 1)
+            self.assertIn("ValueError", str(output.call_args))
+
     def test_no_secret_in_fatal_output(self):
         with patch.dict("os.environ", {"GITHUB_REPOSITORY": "owner/repo"}), \
                 patch("launch.tempfile.TemporaryDirectory", side_effect=ValueError("SECRET")), \

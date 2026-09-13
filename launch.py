@@ -85,30 +85,54 @@ def attempt(compute, block, repository, check=False):
     return "launched"
 
 
+def local_config():
+    config = oci.config.from_file()
+    if config.get('tenancy') != TENANCY:
+        raise ValueError('Unexpected tenancy')
+    config.update(region=REGION, log_requests=False)
+    oci.config.validate_config(config)
+    return config
+
+
+def ephemeral_config(directory, secrets):
+    config_path = Path(directory) / "config"
+    key_path = Path(directory) / "key.pem"
+    for path, secret in zip((config_path, key_path), secrets):
+        path.touch(mode=0o600)
+        path.write_text(secret)
+    # Replace workstation-specific key paths before SDK path validation.
+    parser_config = configparser.ConfigParser(interpolation=None)
+    parser_config.read(config_path)
+    parser_config["DEFAULT"]["key_file"] = str(key_path)
+    with config_path.open("w") as config_file:
+        parser_config.write(config_file)
+    config = oci.config.from_file(str(config_path), "DEFAULT")
+    if config.get("tenancy") != TENANCY:
+        raise ValueError("Unexpected tenancy")
+    config.update(region=REGION, key_file=str(key_path), log_requests=False)
+    oci.config.validate_config(config)
+    return config
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     try:
-        repository = os.environ.get("GITHUB_REPOSITORY") or os.environ["OCI_REPOSITORY"]
-        repository = repository_name(repository)
+        repository = os.environ.get("GITHUB_REPOSITORY") or os.environ.get("OCI_REPOSITORY") or None
+        if repository is None and not args.check:
+            # Stable retry identity for local single shots; harmless to keep across runs.
+            repository = "local/oci-a1-capacity"
+        if repository is not None:
+            repository = repository_name(repository)
         with tempfile.TemporaryDirectory(prefix="oci-a1-") as directory:
-            config_path = Path(directory) / "config"
-            key_path = Path(directory) / "key.pem"
-            for path, secret in ((config_path, "OCI_CONFIG"), (key_path, "OCI_API_KEY")):
-                path.touch(mode=0o600)
-                path.write_text(os.environ[secret])
-            # Replace workstation-specific key paths before SDK path validation.
-            parser_config = configparser.ConfigParser(interpolation=None)
-            parser_config.read(config_path)
-            parser_config["DEFAULT"]["key_file"] = str(key_path)
-            with config_path.open("w") as config_file:
-                parser_config.write(config_file)
-            config = oci.config.from_file(str(config_path), "DEFAULT")
-            if config.get("tenancy") != TENANCY:
-                raise ValueError("Unexpected tenancy")
-            config.update(region=REGION, key_file=str(key_path), log_requests=False)
-            oci.config.validate_config(config)
+            secrets = (os.environ.get("OCI_CONFIG"), os.environ.get("OCI_API_KEY"))
+            if any(secrets) and not all(secrets):
+                raise ValueError("OCI_CONFIG and OCI_API_KEY must be set together")
+            if all(secrets):
+                config = ephemeral_config(directory, secrets)
+            else:
+                config = local_config()
             options = {"retry_strategy": oci.retry.NoneRetryStrategy()}
             result = attempt(oci.core.ComputeClient(config, **options),
                              oci.core.BlockstorageClient(config, **options),

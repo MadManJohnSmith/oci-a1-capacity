@@ -168,13 +168,13 @@ Los secretos se escriben temporalmente y no deben aparecer en logs, issues, repo
 
 ### Ejecución local
 
-No guardes credenciales en el repositorio. Usa variables de entorno o el archivo estándar de OCI con permisos restrictivos. Para el monitor local, `clients()` usa la configuración OCI local del usuario.
+No guardes credenciales en el repositorio. Usa variables de entorno o el archivo estándar de OCI con permisos restrictivos. Para el monitor local, `clients()` usa la configuración OCI local del usuario; `launch.py` hace lo mismo cuando no detecta los secretos de Actions.
 
 Variables habituales:
 
 | Variable | Uso | Valor por defecto |
 |---|---|---|
-| `OCI_REPOSITORY` | Repositorio estable para el token de `launch.py` | obligatorio fuera de GitHub |
+| `OCI_REPOSITORY` | Repositorio estable para el token de `launch.py` | `local/oci-a1-capacity` fuera de GitHub |
 | `GITHUB_REPOSITORY` | Repositorio usado automáticamente en Actions | lo proporciona GitHub |
 | `OCI_OCPUS` | OCPU Flex solicitadas | `2` |
 | `OCI_MEMORY_GB` | Memoria solicitada | `12` |
@@ -214,7 +214,7 @@ Si usas otra ruta, exporta `OCI_VENV` en tu shell o en el servicio. El lanzador 
 
 `launch.py --check` no lanza una instancia y no deshabilita workflows. La salida `ready` solo significa que el boot volume está disponible y sin attachments activos; no demuestra capacidad física.
 
-**Nota para ejecución local:** `launch.py` está diseñado para GitHub Actions y exige las variables `OCI_CONFIG`, `OCI_API_KEY` y `OCI_REPOSITORY` en el entorno (mismo formato de secretos que la sección anterior). Sin ellas termina con `Failed (KeyError)`. Para comprobaciones locales normales usa `./run.sh local_runner.py --check`, que lee la configuración estándar de `~/.oci/config` y no necesita secretos exportados.
+**Ejecución local:** si no hay secretos exportados, `launch.py` lee la configuración estándar de `~/.oci/config` y usa el repositorio estable `local/oci-a1-capacity` para el token de reintento. En GitHub Actions sigue usando los secretos `OCI_CONFIG`/`OCI_API_KEY` y `GITHUB_REPOSITORY`; si defines solo uno de los dos secretos, termina con error en lugar de mezclar orígenes de credenciales.
 
 ### Monitor persistente
 

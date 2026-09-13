@@ -4,6 +4,49 @@ Monitor local y workflow de GitHub Actions para intentar crear una instancia `VM
 
 > **Importante:** este proyecto no garantiza que OCI tenga capacidad, no garantiza la elegibilidad Always Free y no elimina el riesgo de costes. Ejecuta los intentos solo si entiendes las cuotas, permisos y facturación de tu cuenta.
 
+## Por qué existe este proyecto
+
+Este proyecto se creó con una intención concreta: **obtener acceso a los recursos Always Free de OCI**, concretamente volver a levantar una instancia `VM.Standard.A1.Flex` (Ampere A1) desde un boot volume existente. El boot volume conserva un sistema instalado, pero OCI lleva tiempo rechazando cada creación con `Out of host capacity` porque no hay hosts A1 libres en el AD de la región. El runner automatiza el reintento periódico para tomar el primer host que se libere, sin intervención manual.
+
+Ese objetivo encaja con el programa Always Free, que históricamente incluía 4 OCPU y 24 GB de Ampere A1 de uso gratuito continuo. Véase la sección siguiente: Oracle redujo esos límites en 2026.
+
+## Cambio de límites Always Free (junio de 2026)
+
+El **15 de junio de 2026**, Oracle redujo a la mitad el límite Always Free de Ampere A1. El cambio se aplicó sin anuncio público (los avisos por correo aparecieron hacia el 12 de junio y la documentación oficial refleja los nuevos valores desde cerca del 21 de junio de 2026):
+
+| | Antes del 15-jun-2026 | Desde el 15-jun-2026 |
+|---|---|---|
+| OCPU A1 | 4 | 2 |
+| Memoria A1 | 24 GB | 12 GB |
+| Consumo mensual equivalente | 3.000 OCPU-h + 18.000 GB-h | 1.500 OCPU-h + 9.000 GB-h |
+
+Consecuencias prácticas:
+
+- Una cuenta Always Free nueva solo puede usar **2 OCPU / 12 GB en total** de A1: una instancia de ese tamaño, o dos de 1 OCPU / 6 GB.
+- Con la nueva asignación horaria, una instancia A1 en marcha continua consume el allowance gratuito en ~15–16 días al mes; mantenerse dentro de Always Free puede exigir detener la instancia parte del mes.
+- Tenancies PAYG (con método de pago registrado) mantienen 4 OCPU / 24 GB según reportes de la comunidad y confirmaciones de soporte de Oracle.
+
+La configuración por defecto de este proyecto (2 OCPU / 12 GB) ya coincide con el nuevo límite Always Free. La combinación 4/24 sigue disponible vía `OCI_OCPUS`/`OCI_MEMORY_GB` para quien conserve el límite anterior.
+
+## Inicio rápido
+
+Requisito previo único: la configuración estándar del CLI de OCI en `~/.oci/config` (perfil `DEFAULT`) con permisos para leer el boot volume, sus attachments y crear una instancia desde él.
+
+```sh
+python3 -m venv ~/venvs/oci-official          # la ruta que run.sh usa por defecto
+~/venvs/oci-official/bin/pip install -r requirements.txt
+./run.sh local_runner.py --check              # verificación read-only del boot volume
+./run.sh local_runner.py --status             # último resultado del monitor
+
+# Monitor persistente como servicio de usuario:
+cp oci-vm.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now oci-vm.service
+journalctl --user -u oci-vm.service -f
+```
+
+Con eso el runner queda intentando cada 5 minutos y avisando en escritorio/webhook cuando la instancia arranque. Si prefieres otro venv, exporta `OCI_VENV=/ruta/al/venv` antes de usar `run.sh`. El resto de este documento detalla el comportamiento, la configuración opcional y los riesgos.
+
 ## Público objetivo
 
 Este repositorio está dirigido a:
@@ -146,15 +189,14 @@ Los webhooks requieren HTTPS y, para ser aceptados, un host incluido en `OCI_NOT
 
 ## Instalación local
 
-Desde la raíz del repositorio:
+Desde la raíz del repositorio. El lanzador `run.sh` ejecuta el intérprete de `~/venvs/oci-official` por defecto (o el de `OCI_VENV` si lo defines), así que crea el venv en esa ruta para que todos los comandos documentados funcionen sin más:
 
 ```sh
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -r requirements.txt
+python3 -m venv ~/venvs/oci-official
+~/venvs/oci-official/bin/python -m pip install -r requirements.txt
 ```
 
-También puedes usar el lanzador incluido, que limpia variables de entorno problemáticas:
+Si usas otra ruta, exporta `OCI_VENV` en tu shell o en el servicio. El lanzador limpia variables de entorno problemáticas:
 
 ```sh
 ./run.sh -m unittest discover -v
@@ -171,6 +213,8 @@ También puedes usar el lanzador incluido, que limpia variables de entorno probl
 ```
 
 `launch.py --check` no lanza una instancia y no deshabilita workflows. La salida `ready` solo significa que el boot volume está disponible y sin attachments activos; no demuestra capacidad física.
+
+**Nota para ejecución local:** `launch.py` está diseñado para GitHub Actions y exige las variables `OCI_CONFIG`, `OCI_API_KEY` y `OCI_REPOSITORY` en el entorno (mismo formato de secretos que la sección anterior). Sin ellas termina con `Failed (KeyError)`. Para comprobaciones locales normales usa `./run.sh local_runner.py --check`, que lee la configuración estándar de `~/.oci/config` y no necesita secretos exportados.
 
 ### Monitor persistente
 
@@ -214,6 +258,8 @@ El servicio aplica `UMask=0077`, `NoNewPrivileges`, `PrivateTmp`, protección de
 No ejecutes simultáneamente este servicio y el workflow de capacidad contra el mismo boot volume. El lock local no coordina máquinas diferentes.
 
 ## GitHub Actions
+
+**Estado actual (septiembre de 2026):** el workflow `capacity.yml` está deshabilitado manualmente en GitHub. El mecanismo activo es el monitor local (`oci-vm.service`), que corre de forma permanente. Re-habilita el workflow temporalmente desde la pestaña Actions solo cuando la máquina local vaya a estar apagada, y en ese caso detén el monitor local para no lanzar contra el mismo boot volume desde dos sitios.
 
 ### `capacity.yml`
 
@@ -279,7 +325,7 @@ Después revisa attachments e instancias desde la consola o CLI de OCI. No borre
 - OCI puede cobrar cómputo, IP pública, red, almacenamiento, backups u otros consumos según la cuenta.
 - GitHub Actions consume minutos y puede cobrar según el plan.
 - Una cuota libre no prueba capacidad física.
-- Always Free depende de la cuenta, región principal, límites y consumo total.
+- Always Free depende de la cuenta, región principal, límites y consumo total. Desde el 15 de junio de 2026 el límite A1 Always Free es de 2 OCPU / 12 GB (antes 4 OCPU / 24 GB); véase la sección «Cambio de límites Always Free».
 - El lock es solo local; no existe exclusión global entre máquinas.
 - OCI puede caducar o invalidar tokens de reintento.
 - El programa no termina instancias ni recursos creados por el operador.

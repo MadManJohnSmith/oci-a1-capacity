@@ -57,7 +57,35 @@ class RunnerTests(unittest.TestCase):
             mock_urlopen.assert_not_called()
 
     @patch('local_runner.clients')
-    def test_network_error_handled_gracefully(self, mock_clients):
+    def test_network_error_during_launch_requires_reconciliation(self, mock_clients):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_path = Path(tmpdir)
+            with patch('local_runner.CACHE', cache_path), \
+                 patch('sys.argv', ['local_runner.py']), \
+                 patch('local_runner.STOP') as mock_stop:
+                mock_stop.is_set.side_effect = [False, True]
+                mock_stop.wait.return_value = False
+                compute, block, network = Mock(), Mock(), Mock()
+                compute.list_boot_volume_attachments.__name__ = 'list_boot_volume_attachments'
+                mock_clients.return_value = (compute, block, network)
+                volume = SimpleNamespace(availability_domain=local_runner.AD, compartment_id=local_runner.TENANCY, lifecycle_state='AVAILABLE')
+                block.get_boot_volume.return_value = SimpleNamespace(data=volume, status=200)
+                block.get_boot_volume.__name__ = 'get_boot_volume'
+                with patch('local_runner.oci.pagination.list_call_get_all_results') as mock_pages:
+                    mock_pages.return_value = SimpleNamespace(data=[], status=200)
+                    compute.launch_instance.__name__ = 'launch_instance'
+                    compute.launch_instance.side_effect = oci.exceptions.ConnectTimeout(Exception("connection timed out"))
+
+                    exit_code = local_runner.main()
+                    self.assertEqual(exit_code, 2)
+                    status_file = cache_path / 'status.json'
+                    self.assertTrue(status_file.exists())
+                    status = json.loads(status_file.read_text())
+                    self.assertEqual(status['result'], 'reconcile_required')
+                    self.assertEqual(status['response_category'], 'ambiguous')
+
+    @patch('local_runner.clients')
+    def test_network_error_during_inspect_is_transient(self, mock_clients):
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_path = Path(tmpdir)
             with patch('local_runner.CACHE', cache_path), \
@@ -68,15 +96,15 @@ class RunnerTests(unittest.TestCase):
                 compute, block, network = Mock(), Mock(), Mock()
                 mock_clients.return_value = (compute, block, network)
                 block.get_boot_volume.__name__ = 'get_boot_volume'
-                block.get_boot_volume.side_effect = oci.exceptions.RequestException(Exception("connection failed"))
+                block.get_boot_volume.side_effect = oci.exceptions.ConnectTimeout(Exception("connection timed out"))
 
                 exit_code = local_runner.main()
-                self.assertEqual(exit_code, 2)
+                self.assertEqual(exit_code, 0)
                 status_file = cache_path / 'status.json'
                 self.assertTrue(status_file.exists())
                 status = json.loads(status_file.read_text())
-                self.assertEqual(status['result'], 'reconcile_required')
-                self.assertEqual(status['response_category'], 'ambiguous')
+                self.assertEqual(status['result'], 'transient_network_error')
+                self.assertEqual(status['response_category'], 'transient')
 
     @patch('local_runner.clients')
     def test_token_rotation_when_idle(self, mock_clients):

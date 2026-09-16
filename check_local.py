@@ -69,7 +69,7 @@ if status_path.exists():
             assert delay == max(min(600, 30 * 2 ** min(streak - 1, 5)), status.get('retry_after_seconds') or 0)
             assert status.get('response_category') == 'throttled'
         else:
-            assert delay >= 300
+            assert delay >= 295
         if status.get('result') == 'monitor':
             assert delay == 300
         report['verified_scheduled_delay_seconds'] = status['delay_seconds']

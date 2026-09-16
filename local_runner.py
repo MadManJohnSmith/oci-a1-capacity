@@ -331,8 +331,11 @@ def main():
                         category, result, permanent = 'permanent', dict(result='permanent_service_error', http_status=exc.status), True
                     else:
                         category, result = 'transient', dict(result='transient_service_error', http_status=exc.status)
-                except (oci.exceptions.RequestException, TimeoutError) as exc:
-                    category, result, permanent = 'ambiguous', dict(result='reconcile_required', reason=type(exc).__name__), True
+                except (oci.exceptions.BaseRequestException, TimeoutError) as exc:
+                    if state.get('launch_pending'):
+                        category, result, permanent = 'ambiguous', dict(result='reconcile_required', reason=type(exc).__name__), True
+                    else:
+                        category, result = 'transient', dict(result='transient_network_error', error_type=type(exc).__name__)
                 except OSError:
                     raise
                 except Exception as exc:

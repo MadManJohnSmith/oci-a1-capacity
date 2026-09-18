@@ -138,6 +138,23 @@ class RunnerTests(unittest.TestCase):
                     self.assertNotEqual(new_state['token'], old_token)
                     self.assertGreater(new_state['token_created'], old_time)
 
+    def test_pending_reconciles_to_matching_instance(self):
+        compute, block = Mock(), Mock()
+        volume = SimpleNamespace(compartment_id=local_runner.TENANCY, availability_domain=local_runner.AD)
+        block.get_boot_volume.return_value = SimpleNamespace(data=volume)
+        instance = SimpleNamespace(id='ocid1.instance.oc1.x.' + 'a' * 20, display_name='oci-a1', compartment_id=local_runner.TENANCY, shape='VM.Standard.A1.Flex')
+        with patch('local_runner.oci.pagination.list_call_get_all_results') as pages:
+            pages.side_effect = [SimpleNamespace(data=[]), SimpleNamespace(data=[instance])]
+            self.assertEqual(local_runner.reconcile_pending(compute, block), instance.id)
+
+    def test_pending_reconciliation_returns_none_without_instance(self):
+        compute, block = Mock(), Mock()
+        volume = SimpleNamespace(compartment_id=local_runner.TENANCY, availability_domain=local_runner.AD)
+        block.get_boot_volume.return_value = SimpleNamespace(data=volume)
+        with patch('local_runner.oci.pagination.list_call_get_all_results') as pages:
+            pages.side_effect = [SimpleNamespace(data=[]), SimpleNamespace(data=[])]
+            self.assertIsNone(local_runner.reconcile_pending(compute, block))
+
     @patch('local_runner.clients')
     def test_token_fails_closed_when_pending_across_expiry(self, mock_clients):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -160,7 +177,7 @@ class RunnerTests(unittest.TestCase):
                 block.get_boot_volume.return_value = SimpleNamespace(data=volume, status=200)
                 block.get_boot_volume.__name__ = 'get_boot_volume'
                 with patch('local_runner.oci.pagination.list_call_get_all_results') as mock_pages:
-                    mock_pages.return_value = SimpleNamespace(data=[], status=200)
+                    mock_pages.side_effect = [SimpleNamespace(data=[], status=200), SimpleNamespace(data=[], status=200), SimpleNamespace(data=[], status=200)]
                     exit_code = local_runner.main()
                     self.assertEqual(exit_code, 2)
                     status_file = cache_path / 'status.json'

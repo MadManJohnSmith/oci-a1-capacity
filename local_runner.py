@@ -169,6 +169,20 @@ def public_ip(value):
         return None
 
 
+def reconcile_pending(compute, block, call=direct):
+    volume, active = inspect(compute, block, call)
+    if active:
+        return next(iter({a.instance_id for a in active}))
+    instances = oci.pagination.list_call_get_all_results(
+        compute.list_instances, compartment_id=volume.compartment_id).data
+    matches = [i for i in instances
+               if i.display_name == 'oci-a1' and i.compartment_id == volume.compartment_id
+               and getattr(i, 'shape', None) == 'VM.Standard.A1.Flex']
+    if matches:
+        return matches[0].id
+    return None
+
+
 def monitor(compute, network, instance_id, call=direct):
     if not valid_ocid(instance_id):
         raise ValueError('Invalid instance identity')
@@ -288,9 +302,16 @@ def main():
                             notify('Instance RUNNING')
                             notified = True
                     elif state.get('launch_pending'):
-                        category = 'reconcile_required'
-                        permanent = True
-                        result = dict(result='reconcile_required', reason='pending request has no confirmed attachment')
+                        instance_id = reconcile_pending(compute, block, call)
+                        if instance_id:
+                            state['instance_id'] = instance_id
+                            state['launch_pending'] = False
+                            atomic(path, state)
+                            result = monitor(compute, network, instance_id, call)
+                        else:
+                            category = 'reconcile_required'
+                            permanent = True
+                            result = dict(result='reconcile_required', reason='pending request has no confirmed attachment')
                     elif volume.lifecycle_state != 'AVAILABLE':
                         result = dict(result='boot_unavailable', boot_state=volume.lifecycle_state)
                     else:

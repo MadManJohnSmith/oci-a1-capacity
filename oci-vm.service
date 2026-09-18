@@ -8,6 +8,7 @@ Type=simple
 WorkingDirectory=%h/oci-a1-capacity
 ExecStart=%h/oci-a1-capacity/run.sh local_runner.py
 Environment=PYTHONUNBUFFERED=1
+Environment=OCI_CAPACITY_MAX_DELAY=30
 UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes

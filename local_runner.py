@@ -309,9 +309,12 @@ def main():
                             atomic(path, state)
                             result = monitor(compute, network, instance_id, call)
                         else:
-                            category = 'reconcile_required'
-                            permanent = True
-                            result = dict(result='reconcile_required', reason='pending request has no confirmed attachment')
+                            state['launch_pending'] = False
+                            state['token'] = uuid.uuid4().hex
+                            state['token_created'] = time.time()
+                            atomic(path, state)
+                            category = 'reconciled'
+                            result = dict(result='reconciled', reason='pending launch not found, cleared')
                     elif volume.lifecycle_state != 'AVAILABLE':
                         result = dict(result='boot_unavailable', boot_state=volume.lifecycle_state)
                     else:
@@ -332,8 +335,7 @@ def main():
                         result = dict(result='accepted', instance_id=instance_id, instance_state=response.data.lifecycle_state)
                 except oci.exceptions.ServiceError as exc:
                     if state.get('launch_pending') and exc.status not in (400, 401, 403, 404, 409, 429, 500):
-                        category, result = 'ambiguous', dict(result='reconcile_required', http_status=exc.status)
-                        permanent = True
+                        category, result = 'ambiguous', dict(result='ambiguous_launch', http_status=exc.status)
                     elif exc.status == 429:
                         state['launch_pending'] = False
                         state['throttle_streak'] = state.get('throttle_streak', 0) + 1
@@ -354,7 +356,7 @@ def main():
                         category, result = 'transient', dict(result='transient_service_error', http_status=exc.status)
                 except (oci.exceptions.BaseRequestException, TimeoutError) as exc:
                     if state.get('launch_pending'):
-                        category, result, permanent = 'ambiguous', dict(result='reconcile_required', reason=type(exc).__name__), True
+                        category, result = 'ambiguous', dict(result='ambiguous_launch', reason=type(exc).__name__)
                     else:
                         category, result = 'transient', dict(result='transient_network_error', error_type=type(exc).__name__)
                 except OSError:

@@ -57,7 +57,7 @@ class RunnerTests(unittest.TestCase):
             mock_urlopen.assert_not_called()
 
     @patch('local_runner.clients')
-    def test_network_error_during_launch_requires_reconciliation(self, mock_clients):
+    def test_network_error_during_launch_recovers(self, mock_clients):
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_path = Path(tmpdir)
             with patch('local_runner.CACHE', cache_path), \
@@ -77,12 +77,13 @@ class RunnerTests(unittest.TestCase):
                     compute.launch_instance.side_effect = oci.exceptions.ConnectTimeout(Exception("connection timed out"))
 
                     exit_code = local_runner.main()
-                    self.assertEqual(exit_code, 2)
+                    self.assertEqual(exit_code, 0)
                     status_file = cache_path / 'status.json'
                     self.assertTrue(status_file.exists())
                     status = json.loads(status_file.read_text())
-                    self.assertEqual(status['result'], 'reconcile_required')
+                    self.assertEqual(status['result'], 'ambiguous_launch')
                     self.assertEqual(status['response_category'], 'ambiguous')
+                    self.assertIsNotNone(status['next_attempt'])
 
     @patch('local_runner.clients')
     def test_network_error_during_inspect_is_transient(self, mock_clients):
@@ -156,7 +157,7 @@ class RunnerTests(unittest.TestCase):
             self.assertIsNone(local_runner.reconcile_pending(compute, block))
 
     @patch('local_runner.clients')
-    def test_token_fails_closed_when_pending_across_expiry(self, mock_clients):
+    def test_pending_reconciliation_clears_and_continues(self, mock_clients):
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_path = Path(tmpdir)
             state_file = cache_path / 'runner-state.json'
@@ -167,7 +168,7 @@ class RunnerTests(unittest.TestCase):
             with patch('local_runner.CACHE', cache_path), \
                  patch('sys.argv', ['local_runner.py']), \
                  patch('local_runner.STOP') as mock_stop:
-                mock_stop.is_set.side_effect = [False, False, True]
+                mock_stop.is_set.side_effect = [False, True]
                 mock_stop.wait.return_value = False
                 compute, block, network = Mock(), Mock(), Mock()
                 compute.list_boot_volume_attachments.__name__ = 'list_boot_volume_attachments'
@@ -177,13 +178,19 @@ class RunnerTests(unittest.TestCase):
                 block.get_boot_volume.return_value = SimpleNamespace(data=volume, status=200)
                 block.get_boot_volume.__name__ = 'get_boot_volume'
                 with patch('local_runner.oci.pagination.list_call_get_all_results') as mock_pages:
-                    mock_pages.side_effect = [SimpleNamespace(data=[], status=200), SimpleNamespace(data=[], status=200), SimpleNamespace(data=[], status=200)]
+                    mock_pages.side_effect = [
+                        SimpleNamespace(data=[], status=200),
+                        SimpleNamespace(data=[], status=200),
+                        SimpleNamespace(data=[], status=200),
+                    ]
                     exit_code = local_runner.main()
-                    self.assertEqual(exit_code, 2)
-                    status_file = cache_path / 'status.json'
-                    status = json.loads(status_file.read_text())
-                    self.assertEqual(status['result'], 'reconcile_required')
-                    self.assertEqual(status['response_category'], 'reconcile_required')
+                    self.assertEqual(exit_code, 0)
+                    new_state = json.loads(state_file.read_text())
+                    self.assertFalse(new_state['launch_pending'])
+                    self.assertNotEqual(new_state['token'], old_token)
+                    status = json.loads((cache_path / 'status.json').read_text())
+                    self.assertEqual(status['result'], 'reconciled')
+                    self.assertEqual(status['response_category'], 'reconciled')
 
     def test_status_flag_when_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -272,6 +279,36 @@ class RunnerTests(unittest.TestCase):
                     self.assertEqual(status['throttle_streak'], 0)
                     state = json.loads((cache_path / 'runner-state.json').read_text())
                     self.assertEqual(state['throttle_streak'], 0)
+
+    @patch('local_runner.clients')
+    def test_ambiguous_launch_self_heals_on_next_iteration(self, mock_clients):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_path = Path(tmpdir)
+            with patch('local_runner.CACHE', cache_path), \
+                 patch('sys.argv', ['local_runner.py']), \
+                 patch('local_runner.STOP') as mock_stop:
+                mock_stop.is_set.side_effect = [False, False, False, True]
+                mock_stop.wait.return_value = False
+                compute, block, network = Mock(), Mock(), Mock()
+                compute.list_boot_volume_attachments.__name__ = 'list_boot_volume_attachments'
+                mock_clients.return_value = (compute, block, network)
+                volume = SimpleNamespace(availability_domain=local_runner.AD, compartment_id=local_runner.TENANCY, lifecycle_state='AVAILABLE')
+                block.get_boot_volume.return_value = SimpleNamespace(data=volume, status=200)
+                block.get_boot_volume.__name__ = 'get_boot_volume'
+                with patch('local_runner.oci.pagination.list_call_get_all_results') as mock_pages:
+                    mock_pages.return_value = SimpleNamespace(data=[], status=200)
+                    compute.launch_instance.__name__ = 'launch_instance'
+                    compute.launch_instance.side_effect = [
+                        oci.exceptions.ConnectTimeout(Exception("connection timed out")),
+                        oci.exceptions.ServiceError(500, 'InternalError', {}, 'Out of host capacity.'),
+                    ]
+                    exit_code = local_runner.main()
+                    self.assertEqual(exit_code, 0)
+                    state = json.loads((cache_path / 'runner-state.json').read_text())
+                    self.assertFalse(state['launch_pending'])
+                    self.assertEqual(state['capacity_streak'], 1)
+                    status = json.loads((cache_path / 'status.json').read_text())
+                    self.assertEqual(status['result'], 'capacity')
 
     @patch('local_runner.clients')
     def test_jitter_and_capacity_max_delay(self, mock_clients):

@@ -4,7 +4,6 @@
   "meta": {
     "title": "OCI A1 Capacity Runner — Flujo seguro",
     "quality_profile": "showcase",
-    "viewBox": [1000, 720],
     "output": "oci-a1-flow.html"
   },
   "lanes": [
@@ -16,7 +15,7 @@
     { "id": "prepare", "label": "Preparar", "fromCol": 0, "toCol": 1 },
     { "id": "inspect", "label": "Inspeccionar", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
     { "id": "decide", "label": "Decidir", "fromCol": 4, "toCol": 4 },
-    { "id": "recover", "label": "Reintentar o detener", "fromCol": 5, "toCol": 5, "variant": "security" }
+    { "id": "recover", "label": "Reintentar o reconciliar", "fromCol": 5, "toCol": 5, "variant": "security" }
   ],
   "groups": [
     { "id": "safe_launch", "label": "Solo una solicitud idempotente", "lane": "runner", "fromCol": 3, "toCol": 5, "variant": "emphasis" },
@@ -47,6 +46,6 @@
   ],
   "cards": [
     { "dot": "rose", "title": "Regla crítica", "items": ["Un error ambiguo no limpia launch_pending", "Nunca se renueva el token mientras hay una solicitud pendiente", "Se reconcilia antes de volver a crear"] },
-    { "dot": "emerald", "title": "Resultados seguros", "items": ["capacity: espera y vuelve a comprobar", "accepted: guarda la instancia y monitoriza", "reconcile_required: detiene para revisión humana"] }
+    { "dot": "emerald", "title": "Resultados seguros", "items": ["capacity: espera y vuelve a comprobar", "accepted: guarda la instancia y monitoriza", "ambiguous_launch: reconcilia en el siguiente intento", "reconciled: pendiente verificado sin instancia, continúa"] }
   ]
 }

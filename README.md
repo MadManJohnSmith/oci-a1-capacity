@@ -1,6 +1,6 @@
 # OCI A1 Capacity Runner
 
-Monitor local y workflow de GitHub Actions para intentar crear una instancia `VM.Standard.A1.Flex` desde un boot volume existente cuando Oracle Cloud Infrastructure (OCI) informa que vuelve a haber capacidad física.
+Runner local para Linux que reintenta automáticamente, cada ~30 segundos, la creación de una instancia `VM.Standard.A1.Flex` (Ampere A1) desde un boot volume existente hasta que Oracle Cloud Infrastructure (OCI) tiene capacidad de host disponible. Cuando OCI acepta el lanzamiento, monitoriza la instancia hasta `RUNNING` y notifica en escritorio o webhook. Incluye un workflow opcional de GitHub Actions con el mismo propósito para cuando la máquina local está apagada.
 
 > **Importante:** este proyecto no garantiza que OCI tenga capacidad, no garantiza la elegibilidad Always Free y no elimina el riesgo de costes. Ejecuta los intentos solo si entiendes las cuotas, permisos y facturación de tu cuenta.
 
@@ -28,6 +28,14 @@ Consecuencias prácticas:
 
 La configuración por defecto de este proyecto (2 OCPU / 12 GB) ya coincide con el nuevo límite Always Free. La combinación 4/24 sigue disponible vía `OCI_OCPUS`/`OCI_MEMORY_GB` para quien conserve el límite anterior.
 
+## Cómo funciona (resumen)
+
+1. Verifica que el boot volume esté `AVAILABLE` y sin attachments activos.
+2. Solicita la creación de la instancia A1 con un token de reintento estable (deduplicable por OCI).
+3. Si OCI responde `Out of host capacity` (500), espera ~30 s con jitter y reintenta, indefinidamente.
+4. Si OCI acepta, guarda el OCID de la instancia y pasa a monitorizarla hasta `RUNNING`, con notificación.
+5. Si la respuesta es ambigua (timeout o error de red tras enviar la solicitud), **no lanza una segunda instancia**: espera y reconcilia automáticamente contra OCI en el siguiente intento.
+
 ## Inicio rápido
 
 Requisito previo único: la configuración estándar del CLI de OCI en `~/.oci/config` (perfil `DEFAULT`) con permisos para leer el boot volume, sus attachments y crear una instancia desde él.
@@ -45,7 +53,7 @@ systemctl --user enable --now oci-vm.service
 journalctl --user -u oci-vm.service -f
 ```
 
-Con eso el runner queda intentando cada 5 minutos y avisando en escritorio/webhook cuando la instancia arranque. Si prefieres otro venv, exporta `OCI_VENV=/ruta/al/venv` antes de usar `run.sh`. El resto de este documento detalla el comportamiento, la configuración opcional y los riesgos.
+Con eso el runner queda intentando cada ~30 segundos —la plantilla de servicio fija `OCI_CAPACITY_MAX_DELAY=30`— y avisando en escritorio/webhook cuando la instancia arranque. Sin esa variable, el defecto del código es un tope de 300 s (5 minutos). Si prefieres otro venv, exporta `OCI_VENV=/ruta/al/venv` antes de usar `run.sh`. El resto de este documento detalla el comportamiento, la configuración opcional y los riesgos.
 
 ## Público objetivo
 
@@ -57,13 +65,22 @@ Este repositorio está dirigido a:
 
 No es un servicio administrado, un sistema de alta disponibilidad ni un tutorial para cuentas OCI sin configurar. El operador es responsable de validar región, cuotas, red, costes, seguridad y estado de la cuenta.
 
+## Alcance público y adaptación a tu cuenta
+
+Este repositorio es público, pero **no funciona tal cual para terceros**: la región, tenancy, boot volume, subnet y availability domain están fijados como constantes en `launch.py` y apuntan a la cuenta del autor.
+
+- Tanto `launch.py` como `local_runner.py` importan esas constantes y validan que la tenancy de tus credenciales coincida con `TENANCY`; con la configuración de otra cuenta terminan con `Unexpected tenancy` antes de tocar nada.
+- Para adaptarlo, edita `REGION`, `TENANCY`, `BOOT`, `SUBNET` y `AD` en `launch.py` (es la única fuente de verdad), y ajusta OCPU/memoria con `OCI_OCPUS`/`OCI_MEMORY_GB`.
+- Los OCIDs visibles en el código son del propio autor y se publican como parte del proyecto. No abras issues ni pull requests con tus OCIDs, credenciales ni logs sin sanear (véase «Privacidad y contribuciones»).
+- Los nombres de recursos creados/monitorizados (`oci-a1`, `oci-a1-capacity`) también están fijados en el código.
+
 ## Qué hace
 
 - Consulta el boot volume configurado y todos sus attachments.
 - Intenta crear una instancia A1 con un token de reintento estable.
 - Reintenta de forma secuencial y con backoff cuando OCI devuelve falta de capacidad.
 - Conserva el estado local para sobrevivir a reinicios.
-- Se detiene ante una respuesta ambigua que podría haber aceptado un lanzamiento, para reconciliar antes de crear otra instancia.
+- Ante una respuesta ambigua que podría haber aceptado un lanzamiento, conserva el estado pendiente y reconcilia automáticamente contra OCI antes de crear otra instancia.
 - Puede monitorizar una instancia encontrada; no la inicia, detiene ni termina.
 - Ofrece comprobaciones de solo lectura y un informe local sanitizable.
 
@@ -118,7 +135,7 @@ Se entregan dos diagramas standalone con SVG inline, temas claro/oscuro, búsque
 - [Arquitectura del sistema](oci-a1-architecture.html) — componentes locales, OCI, estado y límites de seguridad.
 - [Flujo seguro de lanzamiento](oci-a1-flow.html) — comprobación, capacidad, aceptación y reconciliación de solicitudes ambiguas.
 
-Las especificaciones editables son `oci-a1-architecture.json` y `oci-a1-flow.json`. Se validan con Archify en perfil `showcase`. El diagrama de arquitectura también pasó la comprobación automatizada de navegador; el flujo pasó validación semántica y de composición, pero su viewer puede requerir scroll vertical en algunos escritorios por el panel de tarjetas.
+Las especificaciones editables son `oci-a1-architecture.json` y `oci-a1-flow.json`. Se validan con Archify en perfil `showcase` y ambas pasaron la comprobación automatizada de navegador (sin overflow en 1440×900, 1600×1000, 1920×1080 y 2048×1320).
 
 ## Arquitectura
 
@@ -288,7 +305,7 @@ No habilites el workflow de capacidad mientras el monitor local esté activo.
 
 1. Antes de lanzar, se verifican el estado del boot volume y los attachments.
 2. Un resultado conocido de `500 InternalError` con `Out of host capacity` se trata como falta de capacidad.
-3. Un timeout o error de red después de preparar el lanzamiento se trata como ambiguo: se conserva `launch_pending` y se detiene para reconciliar.
+3. Un timeout o error de red después de preparar el lanzamiento se trata como ambiguo: se conserva `launch_pending`, se agenda un reintento y en el ciclo siguiente se reconcilia automáticamente contra OCI. Si no se registró instancia, se limpia el pendiente y se rota el token; si se registró, se monitoriza. Nunca lanza una segunda instancia con un pendiente sin reconciliar.
 4. Si aparece un attachment válido, se guarda la instancia y se monitoriza; no se lanza una segunda instancia.
 5. Errores 429 respetan `Retry-After` con tope de 600 s y backoff exponencial. La espera aplicada se reporta como `throttle_recovery_seconds` y la racha de throttling se reinicia tras cualquier intento no limitado.
 6. Los retardos incorporan jitter acotado para evitar sincronización entre clientes.
@@ -304,13 +321,17 @@ No habilites el workflow de capacidad mientras el monitor local esté activo.
 | `capacity` | OCI rechazó por falta de host | Esperar el siguiente intento |
 | `accepted` | OCI aceptó y devolvió una instancia | Verificar estado/attachment |
 | `monitor` | Hay una instancia conocida | No lanzar otra; observar |
-| `reconcile_required` | Una solicitud podría haber sido aceptada | Detener y revisar OCI antes de borrar estado |
+| `throttled` | OCI limitó la tasa (429) | Nada; respeta `Retry-After` y reintenta |
+| `ambiguous_launch` | Timeout/error de red durante el lanzamiento; no se sabe si OCI aceptó | Automático: reconcilia en el siguiente intento; solo revisa si el servicio se detiene |
+| `reconciled` | El pendiente se verificó: no había instancia y se limpió | Nada; continúa reintentando |
 | `permanent_error` | Error de configuración, validación o política | Corregir causa y revisar estado |
 | `permanent_local_error` | Fallo local al iniciar o persistir estado | Revisar permisos, caché y entorno |
 
 ### Recuperación segura
 
-Si aparece `reconcile_required`:
+La reconciliación de lanzamientos ambiguos es **automática**: ante `ambiguous_launch`, el runner conserva `launch_pending`, espera ~5 minutos y verifica attachments e instancias en el siguiente intento. Si OCI no registró ninguna instancia, limpia el pendiente, rota el token y continúa (`reconciled`); si la registró, monitoriza esa instancia y no lanza otra.
+
+La intervención manual solo aplica si el servicio se detiene por otra causa (`permanent_error`, `permanent_local_error`) o si sospechas que el estado local está corrupto:
 
 ```sh
 ./run.sh local_runner.py --status

@@ -1,6 +1,16 @@
 # OCI A1 Capacity Runner
 
-Runner local para Linux que reintenta automáticamente, cada ~30 segundos, la creación de una instancia `VM.Standard.A1.Flex` (Ampere A1) desde un boot volume existente hasta que Oracle Cloud Infrastructure (OCI) tiene capacidad de host disponible. Cuando OCI acepta el lanzamiento, monitoriza la instancia hasta `RUNNING` y notifica en escritorio o webhook. Incluye un workflow opcional de GitHub Actions con el mismo propósito para cuando la máquina local está apagada.
+[![CI](https://img.shields.io/github/actions/workflow/status/MadManJohnSmith/oci-a1-capacity/ci.yml?branch=main&label=tests)](https://github.com/MadManJohnSmith/oci-a1-capacity/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/MadManJohnSmith/oci-a1-capacity)](https://github.com/MadManJohnSmith/oci-a1-capacity/releases)
+[![Licencia MIT](https://img.shields.io/github/license/MadManJohnSmith/oci-a1-capacity)](LICENSE)
+
+**Tu instancia Ampere A1, sin vigilar la consola.** Oracle tiene tu boot volume esperando un host libre y este runner reclama el primero que se libere: reintenta la creación cada ~30 segundos, día y noche, y cuando OCI acepta el lanzamiento monitoriza el arranque hasta `RUNNING` y te avisa en escritorio o webhook.
+
+- Reintento continuo cada ~30 s, con espera que respeta `Retry-After` cuando OCI limita la tasa.
+- Reconciliación automática ante lanzamientos ambiguos: no crea una segunda instancia con un pendiente sin verificar.
+- Corre como servicio `systemd --user` sandboxeado, con estado persistente y workflow opcional de GitHub Actions para cuando tu máquina está apagada.
+
+📄 [Diagrama de arquitectura](oci-a1-architecture.html) · [Flujo de lanzamiento seguro](oci-a1-flow.html)
 
 > **Importante:** este proyecto no garantiza que OCI tenga capacidad, no garantiza la elegibilidad Always Free y no elimina el riesgo de costes. Ejecuta los intentos solo si entiendes las cuotas, permisos y facturación de tu cuenta.
 

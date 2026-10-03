@@ -10,7 +10,7 @@
 - Reconciliación automática ante lanzamientos ambiguos: no crea una segunda instancia con un pendiente sin verificar.
 - Corre como servicio `systemd --user` sandboxeado, con estado persistente y workflow opcional de GitHub Actions para cuando tu máquina está apagada.
 
-📄 [Diagrama de arquitectura](oci-a1-architecture.html) · [Flujo de lanzamiento seguro](oci-a1-flow.html)
+📄 [Diagrama de arquitectura](https://madmanjohnsmith.github.io/oci-a1-capacity/oci-a1-architecture.html) · [Flujo de lanzamiento seguro](https://madmanjohnsmith.github.io/oci-a1-capacity/oci-a1-flow.html)
 
 > **Importante:** este proyecto no garantiza que OCI tenga capacidad, no garantiza la elegibilidad Always Free y no elimina el riesgo de costes. Ejecuta los intentos solo si entiendes las cuotas, permisos y facturación de tu cuenta.
 
@@ -140,10 +140,10 @@ Los valores estructurales están definidos en `launch.py`. La configuración sol
 
 ## Diagramas
 
-Se entregan dos diagramas standalone con SVG inline, temas claro/oscuro, búsqueda y exportación desde el visor:
+Se entregan dos diagramas standalone con SVG inline, temas claro/oscuro, búsqueda y exportación desde el visor. Se sirven vía GitHub Pages (el código fuente en el repo solo muestra el raw):
 
-- [Arquitectura del sistema](oci-a1-architecture.html) — componentes locales, OCI, estado y límites de seguridad.
-- [Flujo seguro de lanzamiento](oci-a1-flow.html) — comprobación, capacidad, aceptación y reconciliación de solicitudes ambiguas.
+- [Arquitectura del sistema](https://madmanjohnsmith.github.io/oci-a1-capacity/oci-a1-architecture.html) — componentes locales, OCI, estado y límites de seguridad.
+- [Flujo seguro de lanzamiento](https://madmanjohnsmith.github.io/oci-a1-capacity/oci-a1-flow.html) — comprobación, capacidad, aceptación y reconciliación de solicitudes ambiguas.
 
 Las especificaciones editables son `oci-a1-architecture.json` y `oci-a1-flow.json`. Se validan con Archify en perfil `showcase` y ambas pasaron la comprobación automatizada de navegador (sin overflow en 1440×900, 1600×1000, 1920×1080 y 2048×1320).
 

@@ -1,5 +1,6 @@
 """Local OCI launcher/monitor. --check and --status never change OCI."""
 import argparse
+import errno
 import fcntl
 import ipaddress
 import json
@@ -29,6 +30,7 @@ TRANSIENT_DELAY = 300
 THROTTLE_MIN_DELAY = 30
 THROTTLE_MAX_DELAY = 600
 RETRY_AFTER_MAX_DELAY = 600
+COUNT_MAX = 10 ** 9
 STOP = threading.Event()
 LOG = logging.getLogger('oci-vm')
 
@@ -96,40 +98,75 @@ def validate_state(state):
         raise ValueError('Invalid persisted launch identity')
     if not isinstance(state.get('token_created'), (float, int)) or state['token_created'] > time.time() + 60:
         raise ValueError('Invalid token timestamp')
-    for key in ('capacity_streak', 'throttle_streak'):
-        if not isinstance(state.get(key, 0), int) or not 0 <= state.get(key, 0) <= 100000:
+    for key in ('capacity_streak', 'throttle_streak', 'attempts'):
+        value = state.get(key, 0)
+        if not isinstance(value, int) or not 0 <= value <= COUNT_MAX:
             raise ValueError('Invalid retry state')
     if state.get('instance_id') and not valid_ocid(state['instance_id']):
         raise ValueError('Invalid persisted instance identity')
+    events = state.get('notified_events', [])
+    if not isinstance(events, list) or any(event not in ('accepted', 'running') for event in events):
+        raise ValueError('Invalid notification state')
     if not isinstance(state.get('launch_pending', False), bool):
         raise ValueError('Invalid pending state')
 
 
 def notify(text):
-    try:
-        subprocess.run(['notify-send', '--expire-time=10000', 'OCI A1', text], timeout=5, check=True,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        LOG.info('Desktop notification delivered')
-    except (OSError, subprocess.SubprocessError) as exc:
-        LOG.warning('Desktop notification unavailable (%s)', type(exc).__name__)
-    url = os.environ.get('OCI_NOTIFY_WEBHOOK')
-    if not url:
+    delivered = False
+    if os.environ.get('OCI_NOTIFY_DESKTOP', 'true').lower() == 'true':
+        try:
+            subprocess.run(['notify-send', '--expire-time=10000', 'OCI A1', text], timeout=5, check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            LOG.info('Desktop notification delivered')
+            delivered = True
+        except (OSError, subprocess.SubprocessError) as exc:
+            LOG.warning('Desktop notification unavailable (%s)', type(exc).__name__)
+
+    webhook = os.environ.get('OCI_NOTIFY_WEBHOOK')
+    ntfy_file = os.environ.get('OCI_NOTIFY_NTFY_FILE')
+    ntfy_url = None
+    if ntfy_file:
+        try:
+            ntfy_url = Path(ntfy_file).read_text().strip()
+        except OSError as exc:
+            LOG.warning('ntfy configuration unavailable (%s)', type(exc).__name__)
+    for channel, url, hosts in (
+        ('Webhook', webhook, os.environ.get('OCI_NOTIFY_WEBHOOK_HOSTS', '')),
+        ('ntfy', ntfy_url, os.environ.get('OCI_NOTIFY_NTFY_HOSTS', 'ntfy.sh')),
+    ):
+        if not url:
+            continue
+        parsed = urlparse(url)
+        allowed = {host.strip().lower() for host in hosts.split(',') if host.strip()}
+        if (parsed.scheme != 'https' or not parsed.hostname or parsed.hostname.lower() not in allowed
+                or parsed.username or parsed.password or parsed.query or parsed.fragment
+                or (channel == 'ntfy' and not parsed.path.strip('/'))):
+            LOG.warning('%s rejected: invalid HTTPS destination', channel)
+            continue
+        try:
+            import urllib.request
+            data = (text[:500].encode() if channel == 'ntfy' else json.dumps({'text': text[:500]}).encode())
+            headers = {'Content-Type': 'text/plain; charset=utf-8', 'Title': 'OCI A1'} if channel == 'ntfy' else {'Content-Type': 'application/json'}
+            req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+            with urllib.request.urlopen(req, timeout=5) as response:
+                if response.status >= 300:
+                    raise OSError('notification status')
+            LOG.info('%s notification delivered', channel)
+            delivered = True
+        except Exception as exc:
+            LOG.warning('%s notification unavailable (%s)', channel, type(exc).__name__)
+    return delivered
+
+
+def notify_once(state, path, event, text):
+    if event in state.get('notified_events', []):
         return
-    parsed = urlparse(url)
-    allowed = {h.strip().lower() for h in os.environ.get('OCI_NOTIFY_WEBHOOK_HOSTS', '').split(',') if h.strip()}
-    if parsed.scheme != 'https' or not parsed.hostname or (allowed and parsed.hostname.lower() not in allowed):
-        LOG.warning('Webhook rejected: HTTPS and an allowed host are required')
-        return
-    try:
-        import urllib.request
-        req = urllib.request.Request(url, data=json.dumps({'text': text[:500]}).encode(),
-                                     headers={'Content-Type': 'application/json'}, method='POST')
-        with urllib.request.urlopen(req, timeout=5) as response:
-            if response.status >= 300:
-                raise OSError('webhook status')
-        LOG.info('Webhook notification delivered')
-    except Exception as exc:
-        LOG.warning('Webhook notification unavailable (%s)', type(exc).__name__)
+    if notify(text):
+        state.setdefault('notified_events', []).append(event)
+        try:
+            atomic(path, state)
+        except OSError as exc:
+            LOG.warning('Notification state unavailable (%s)', type(exc).__name__)
 
 
 def clients():
@@ -236,7 +273,7 @@ def main():
                 return 0
             next_epoch = status.get('next_attempt_epoch')
             next_str = f"in {max(0, int(next_epoch - time.time()))}s" if isinstance(next_epoch, (int, float)) else 'stopped'
-            print(f"Status: {status.get('result', 'unknown')} | Last: {status.get('last_result_time', 'unknown')} | Next: {next_str} | Delay: {status.get('delay_seconds')}s (jitter: {status.get('jitter_seconds', 0.0):+.2f}s) | Streak: {status.get('capacity_streak', 0)}")
+            print(f"Status: {status.get('result', 'unknown')} | Last: {status.get('last_result_time', 'unknown')} | Next: {next_str} | Delay: {status.get('delay_seconds')}s (jitter: {status.get('jitter_seconds', 0.0):+.2f}s) | Streak: {status.get('capacity_streak', 0)} | Intentos: {status.get('attempts', 0)}")
             return 0
         except Exception as exc:
             print(f'Failed to read status: {type(exc).__name__}')
@@ -265,12 +302,13 @@ def main():
             capacity_delay = min(max(capacity_delay, CAPACITY_MIN_DELAY), capacity_max_delay)
             state['capacity_delay_seconds'] = capacity_delay
             state.setdefault('capacity_streak', 0)
+            state.setdefault('attempts', state['capacity_streak'] + state.get('throttle_streak', 0))
             atomic(path, state)
-            notified = False
             while not STOP.is_set():
                 if STOP.wait(max(0, (state.get('next_attempt_epoch') or 0) - time.time())):
                     break
                 started_epoch, started = time.time(), stamp()
+                state['attempts'] = state.get('attempts', 0) + 1
                 operations = []
 
                 def call(fn, *args, **kwargs):
@@ -298,9 +336,8 @@ def main():
                         state['launch_pending'] = False
                         atomic(path, state)
                         result = monitor(compute, network, state['instance_id'], call)
-                        if result['instance_state'] == 'RUNNING' and not notified:
-                            notify('Instance RUNNING')
-                            notified = True
+                        if result['instance_state'] == 'RUNNING':
+                            notify_once(state, path, 'running', 'OCI A1 instance RUNNING')
                     elif state.get('launch_pending'):
                         instance_id = reconcile_pending(compute, block, call)
                         if instance_id:
@@ -308,6 +345,8 @@ def main():
                             state['launch_pending'] = False
                             atomic(path, state)
                             result = monitor(compute, network, instance_id, call)
+                            if result['instance_state'] == 'RUNNING':
+                                notify_once(state, path, 'running', 'OCI A1 instance RUNNING')
                         else:
                             state['launch_pending'] = False
                             state['token'] = uuid.uuid4().hex
@@ -333,6 +372,7 @@ def main():
                         state['launch_pending'] = False
                         atomic(path, state)
                         result = dict(result='accepted', instance_id=instance_id, instance_state=response.data.lifecycle_state)
+                        notify_once(state, path, 'accepted', 'OCI A1 launch accepted')
                 except oci.exceptions.ServiceError as exc:
                     if state.get('launch_pending') and exc.status not in (400, 401, 403, 404, 409, 429, 500):
                         category, result = 'ambiguous', dict(result='ambiguous_launch', http_status=exc.status)
@@ -370,7 +410,7 @@ def main():
                 next_time = None if permanent else time.time() + effective_delay
                 state['next_attempt_epoch'] = next_time
                 atomic(path, state)
-                status = dict(result, attempt_started=started, last_result_time=stamp(), next_attempt=stamp(next_time) if next_time else None, next_attempt_epoch=next_time, delay_seconds=effective_delay, base_delay_seconds=None if permanent else delay, jitter_seconds=jitter, capacity_delay_seconds=capacity_delay, capacity_streak=state.get('capacity_streak', 0), response_category=category, operations=operations, duration_seconds=round(time.time() - started_epoch, 3), throttle_streak=state.get('throttle_streak', 0), retry_after_seconds=retry_after, throttle_recovery_seconds=recovery)
+                status = dict(result, attempt_started=started, last_result_time=stamp(), next_attempt=stamp(next_time) if next_time else None, next_attempt_epoch=next_time, delay_seconds=effective_delay, base_delay_seconds=None if permanent else delay, jitter_seconds=jitter, capacity_delay_seconds=capacity_delay, capacity_streak=state.get('capacity_streak', 0), attempts=state.get('attempts', 0), response_category=category, operations=operations, duration_seconds=round(time.time() - started_epoch, 3), throttle_streak=state.get('throttle_streak', 0), retry_after_seconds=retry_after, throttle_recovery_seconds=recovery)
                 atomic(CACHE / 'status.json', status)
                 LOG.info('Attempt=%s', json.dumps({k: status[k] for k in ('result', 'attempt_started', 'next_attempt', 'delay_seconds', 'response_category', 'duration_seconds')}))
                 if permanent:
@@ -383,6 +423,10 @@ def main():
             atomic(CACHE / 'status.json', dict(result='permanent_local_error', error_type=type(exc).__name__, last_result_time=stamp(), next_attempt=None))
         except Exception:
             pass
+        if isinstance(exc, OSError) and exc.errno in (errno.ENOSPC, errno.EDQUOT):
+            notify('ALERTA: almacenamiento del teléfono lleno o cuota agotada; el runner OCI A1 se detuvo. Liberar espacio e inodos, luego verificar que cron lo reinicie.')
+        else:
+            notify('OCI A1 runner stopped due to a local error')
         return 2
 
 

@@ -12,6 +12,24 @@ import local_runner
 
 
 class RunnerTests(unittest.TestCase):
+    @patch('local_runner.notify')
+    @patch('local_runner.clients', side_effect=OSError(28, 'No space left on device'))
+    def test_storage_full_sends_specific_alert(self, mock_clients, mock_notify):
+        with tempfile.TemporaryDirectory() as tmpdir, patch('local_runner.CACHE', Path(tmpdir)), \
+                patch('sys.argv', ['local_runner.py']):
+            self.assertEqual(local_runner.main(), 2)
+        mock_notify.assert_called_once()
+        self.assertIn('almacenamiento', mock_notify.call_args[0][0])
+        self.assertIn('lleno', mock_notify.call_args[0][0])
+
+    @patch('local_runner.notify')
+    @patch('local_runner.clients', side_effect=OSError(5, 'Input/output error'))
+    def test_other_os_error_keeps_generic_alert(self, mock_clients, mock_notify):
+        with tempfile.TemporaryDirectory() as tmpdir, patch('local_runner.CACHE', Path(tmpdir)), \
+                patch('sys.argv', ['local_runner.py']):
+            self.assertEqual(local_runner.main(), 2)
+        mock_notify.assert_called_once_with('OCI A1 runner stopped due to a local error')
+
     def test_retry_after_seconds_none_or_missing(self):
         self.assertIsNone(local_runner.retry_after_seconds(None))
         self.assertIsNone(local_runner.retry_after_seconds({}))
@@ -33,7 +51,8 @@ class RunnerTests(unittest.TestCase):
     @patch('urllib.request.urlopen')
     @patch('subprocess.run')
     def test_notify_with_webhook(self, mock_subproc, mock_urlopen):
-        with patch.dict('os.environ', {'OCI_NOTIFY_WEBHOOK': 'https://example.com/hook'}):
+        with patch.dict('os.environ', {'OCI_NOTIFY_WEBHOOK': 'https://example.com/hook',
+                                    'OCI_NOTIFY_WEBHOOK_HOSTS': 'example.com'}):
             local_runner.notify('test-alert')
             mock_subproc.assert_called_once()
             mock_urlopen.assert_called_once()
@@ -55,6 +74,45 @@ class RunnerTests(unittest.TestCase):
             local_runner.notify('test-alert')
             mock_subproc.assert_called_once()
             mock_urlopen.assert_not_called()
+
+    @patch('urllib.request.urlopen')
+    @patch('subprocess.run')
+    def test_notify_ntfy_from_private_file(self, mock_subproc, mock_urlopen):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dest = Path(tmpdir) / 'ntfy-url'
+            dest.write_text('https://ntfy.sh/private-topic\n')
+            mock_urlopen.return_value.__enter__.return_value.status = 200
+            with patch.dict('os.environ', {'OCI_NOTIFY_NTFY_FILE': str(dest),
+                                        'OCI_NOTIFY_DESKTOP': 'false'}, clear=True):
+                self.assertTrue(local_runner.notify('OCI A1 launch accepted'))
+        mock_subproc.assert_not_called()
+        mock_urlopen.assert_called_once()
+        req = mock_urlopen.call_args[0][0]
+        self.assertEqual(req.full_url, 'https://ntfy.sh/private-topic')
+        self.assertEqual(req.data, b'OCI A1 launch accepted')
+        self.assertEqual(req.get_header('Content-type'), 'text/plain; charset=utf-8')
+
+    @patch('urllib.request.urlopen')
+    @patch('subprocess.run')
+    def test_notify_ntfy_rejects_unapproved_host(self, mock_subproc, mock_urlopen):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dest = Path(tmpdir) / 'ntfy-url'
+            dest.write_text('https://example.com/private-topic')
+            with patch.dict('os.environ', {'OCI_NOTIFY_NTFY_FILE': str(dest),
+                                        'OCI_NOTIFY_DESKTOP': 'false'}, clear=True):
+                self.assertFalse(local_runner.notify('test'))
+        mock_subproc.assert_not_called()
+        mock_urlopen.assert_not_called()
+
+    @patch('local_runner.notify', return_value=True)
+    def test_notify_once_persists_across_restart(self, mock_notify):
+        with tempfile.TemporaryDirectory() as tmpdir, patch('local_runner.CACHE', Path(tmpdir)):
+            state = {'token': 'a' * 32, 'token_created': time.time()}
+            path = Path(tmpdir) / 'runner-state.json'
+            local_runner.notify_once(state, path, 'accepted', 'OCI A1 launch accepted')
+            local_runner.notify_once(local_runner.read_json(path), path, 'accepted', 'OCI A1 launch accepted')
+            mock_notify.assert_called_once()
+            self.assertEqual(local_runner.read_json(path)['notified_events'], ['accepted'])
 
     @patch('local_runner.clients')
     def test_network_error_during_launch_recovers(self, mock_clients):
@@ -279,6 +337,38 @@ class RunnerTests(unittest.TestCase):
                     self.assertEqual(status['throttle_streak'], 0)
                     state = json.loads((cache_path / 'runner-state.json').read_text())
                     self.assertEqual(state['throttle_streak'], 0)
+
+    @patch('local_runner.clients')
+    def test_attempts_counter_survives_large_streaks(self, mock_clients):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_path = Path(tmpdir)
+            state_file = cache_path / 'runner-state.json'
+            state_file.write_text(json.dumps({'token': '1' * 32, 'token_created': time.time(),
+                                              'capacity_streak': 250000, 'throttle_streak': 3}))
+            with patch('local_runner.CACHE', cache_path), \
+                 patch('sys.argv', ['local_runner.py']), \
+                 patch('local_runner.STOP') as mock_stop:
+                mock_stop.is_set.side_effect = [False, False, True]
+                mock_stop.wait.return_value = False
+                compute, block, network = Mock(), Mock(), Mock()
+                compute.list_boot_volume_attachments.__name__ = 'list_boot_volume_attachments'
+                mock_clients.return_value = (compute, block, network)
+                volume = SimpleNamespace(availability_domain=local_runner.AD, compartment_id=local_runner.TENANCY, lifecycle_state='AVAILABLE')
+                block.get_boot_volume.return_value = SimpleNamespace(data=volume, status=200)
+                block.get_boot_volume.__name__ = 'get_boot_volume'
+                with patch('local_runner.oci.pagination.list_call_get_all_results') as mock_pages:
+                    mock_pages.return_value = SimpleNamespace(data=[], status=200)
+                    compute.launch_instance.__name__ = 'launch_instance'
+                    compute.launch_instance.side_effect = [
+                        oci.exceptions.ServiceError(500, 'InternalError', {}, 'Out of host capacity.'),
+                        oci.exceptions.ServiceError(500, 'InternalError', {}, 'Out of host capacity.'),
+                    ]
+                    self.assertEqual(local_runner.main(), 0)
+                    status = json.loads((cache_path / 'status.json').read_text())
+                    self.assertEqual(status['attempts'], 250005)
+                    state = json.loads(state_file.read_text())
+                    self.assertEqual(state['capacity_streak'], 250002)
+                    self.assertEqual(state['attempts'], 250005)
 
     @patch('local_runner.clients')
     def test_ambiguous_launch_self_heals_on_next_iteration(self, mock_clients):

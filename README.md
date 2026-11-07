@@ -54,7 +54,7 @@ Requisito previo único: la configuración estándar del CLI de OCI en `~/.oci/c
 python3 -m venv ~/venvs/oci-official          # la ruta que run.sh usa por defecto
 ~/venvs/oci-official/bin/pip install -r requirements.txt
 ./run.sh local_runner.py --check              # verificación read-only del boot volume
-./run.sh local_runner.py --status             # último resultado del monitor
+./run.sh local_runner.py --status             # último resultado del monitor y total de intentos
 
 # Monitor persistente como servicio de usuario:
 cp oci-vm.service ~/.config/systemd/user/
@@ -210,9 +210,12 @@ Variables habituales:
 | `OCI_VENV` | Entorno usado por comandos documentados | depende del shell |
 | `OCI_NOTIFY_WEBHOOK` | Webhook HTTPS opcional | desactivado |
 | `OCI_NOTIFY_WEBHOOK_HOSTS` | Hosts permitidos para el webhook | ninguno; webhook rechazado |
+| `OCI_NOTIFY_NTFY_FILE` | Archivo privado con la URL del tema ntfy | desactivado |
+| `OCI_NOTIFY_NTFY_HOSTS` | Hosts permitidos para ntfy | `ntfy.sh` |
+| `OCI_NOTIFY_DESKTOP` | Mostrar aviso local con `notify-send` | `true` |
 | `OCI_ENABLE_SSH_PROBE` | Habilita prueba TCP/banner SSH opt-in | desactivado |
 
-Los webhooks requieren HTTPS y, para ser aceptados, un host incluido en `OCI_NOTIFY_WEBHOOK_HOSTS`.
+Los webhooks requieren HTTPS y, para ser aceptados, un host incluido en `OCI_NOTIFY_WEBHOOK_HOSTS`. ntfy usa `POST` de texto plano a la URL guardada en `OCI_NOTIFY_NTFY_FILE`; el tema es un secreto, por lo que el archivo debe ser privado. Se avisa al aceptar un lanzamiento, al llegar a `RUNNING` y ante un error permanente; no se avisa por cada rechazo de capacidad o limitación de tasa. El estado recuerda los avisos entregados para evitar duplicados después de un reinicio del proceso.
 
 ## Instalación local
 
@@ -253,10 +256,12 @@ Si usas otra ruta, exporta `OCI_VENV` en tu shell o en el servicio. El lanzador 
 
 `--status` lee únicamente `status.json`. El monitor usa `~/.cache/oci-vm/` con permisos restrictivos y guarda:
 
-- `runner-state.json`: token persistente, `launch_pending`, instancia conocida y backoff.
-- `status.json`: resultado y próxima acción.
+- `runner-state.json`: token persistente, `launch_pending`, instancia conocida, backoff y `attempts` (contador acumulado de intentos, nunca se reinicia).
+- `status.json`: resultado, próxima acción y `attempts`.
 - `runner.log`: operaciones, categorías y duraciones sin cuerpos crudos del SDK.
 - `launch.lock`: exclusión local entre procesos.
+
+Los contadores guardados (`capacity_streak`, `throttle_streak`, `attempts`) se validan como enteros entre 0 y 10^9. Hasta 2026-10-18 el tope era 100000, así que un runner de larga duración podía detenerse solo al superarlo y quedar marcado como fallo permanente; ahora ese límite no se alcanza en la práctica.
 
 ### Assessment read-only
 

@@ -11,3 +11,6 @@ __pycache__/
 config
 oci_config*
 .zcode/
+
+# Capturas/resultados de comprobaciones visuales (generados)
+oci-a1-flow.visual-check.*

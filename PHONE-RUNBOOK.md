@@ -11,11 +11,11 @@ El monitor se ejecuta en el chroot Ubuntu ARM64 de TWRP, no dentro de Android ni
 - ntfy: `/var/lib/oci-a1/.config/oci-a1/ntfy-url` (modo `0600`) contiene una URL privada copiada del `EZARR_NTFY_URL` ya configurado en el teléfono. No imprimirla en logs ni comandos públicos. `phone-supervisor.sh` activa ese canal y desactiva la notificación de escritorio; una publicación de prueba devolvió respuesta HTTP satisfactoria, pero no confirma la recepción en un dispositivo suscrito. Si el runner se detiene por `ENOSPC` (espacio o inodos agotados) o `EDQUOT` (cuota), envía un mensaje específico de **almacenamiento lleno** en lugar del aviso genérico de error local. Solo se detecta si el runner intenta operar y la red de ntfy todavía funciona; no es un monitor preventivo ni cubre todo el teléfono.
 - `cron` ya lo inicia el stack bajo TWRP; `/etc/cron.d/oci-a1` invoca `phone-cron.sh` cada minuto. Este usa `flock` para impedir duplicados y `phone_cron.py` espera al runner, registra `last-exit` y no reinicia si este sale con código `2`. El archivo `paused` en el home impide nuevos arranques. Los fallos recuperables se reintentan en el siguiente tick. La primera ejecución después de que cron arranque depende del hook y watchdog existentes; **no se verificó con un reinicio del teléfono**.
 - Consulta bajo demanda: `/etc/cron.d/oci-a1-http` mantiene `phone_status.py` en `127.0.0.1:18791`, ejecutado como `oci-a1`; Tailscale Serve publica únicamente esta ruta en la tailnet por HTTPS, puerto 18443. No se configura Cloudflare Funnel ni nginx. Solo devuelve un conjunto permitido de campos, no el estado bruto o las credenciales.
-- Resumen diario: `/etc/cron.d/oci-a1-status` ejecuta `phone_status.py --daily` a las **22:00 de America/Mexico_City**. Lee los registros rotados de las últimas 24 horas y envía estado, ciclos y rechazos de capacidad por ntfy. `daily-sent` impide duplicados el mismo día; si falla el envío, cron lo intentará al día siguiente, no dentro de la misma noche. La prueba de ntfy se envió por separado, sin adelantar el resumen programado.
+- Resumen diario: `/etc/cron.d/oci-a1-status` ejecuta `phone_status.py --daily` a las **22:22 de America/Mexico_City**. Lee los registros rotados de las últimas 24 horas y envía estado, ciclos y rechazos de capacidad por ntfy. `daily-sent` impide duplicados el mismo día; si falla el envío, cron lo intentará al día siguiente, no dentro de la misma noche. La prueba de ntfy se envió por separado, sin adelantar el resumen programado.
 
 ## Consulta sin SSH
 
-Desde un dispositivo conectado a **la misma tailnet de Tailscale**, abre [Estado OCI A1](https://localhost-0.tail379df4.ts.net:18443/status). El JSON muestra `service`, `result`, `last_update`, `age_seconds`, `stale`, `next_attempt`, `capacity_streak`, `attempts`, `launch_pending` e `instance_state`. No incluye token, OCIDs, IP pública ni URL ntfy. `attempts` es el total acumulado de intentos del monitor; `capacity_streak` es solo la racha de rechazos por capacidad y vuelve a cero en cuanto OCI responde otra cosa. Durante un intento en curso es normal ver `launch_pending` en `true` con `next_attempt` todavía del ciclo anterior. Si `stale=true`, el archivo dejó de actualizarse; si la URL no abre, podrían haber fallado Tailscale, el servicio HTTP, el teléfono o la conectividad, y el último resultado no es prueba de salud actual. Fuera de la tailnet, el enlace no debe responder. Se validó desde la PC usando Tailscale, sin SSH.
+Desde un dispositivo conectado a **la misma tailnet de Tailscale**, abre `https://localhost-0.<nombre-tailnet>.ts.net:18443/status` (el nombre completo de la tailnet lo ves con `tailscale status`). El JSON muestra `service`, `result`, `last_update`, `age_seconds`, `stale`, `next_attempt`, `capacity_streak`, `attempts`, `launch_pending` e `instance_state`. No incluye token, OCIDs, IP pública ni URL ntfy. `attempts` es el total acumulado de intentos del monitor; `capacity_streak` es solo la racha de rechazos por capacidad y vuelve a cero en cuanto OCI responde otra cosa. Durante un intento en curso es normal ver `launch_pending` en `true` con `next_attempt` todavía del ciclo anterior. Si `stale=true`, el archivo dejó de actualizarse; si la URL no abre, podrían haber fallado Tailscale, el servicio HTTP, el teléfono o la conectividad, y el último resultado no es prueba de salud actual. Fuera de la tailnet, el enlace no debe responder. Se validó desde la PC usando Tailscale, sin SSH.
 
 No activar Tailscale Funnel para esta ruta. Tailscale Serve debe seguir marcándola `tailnet only`; el backend Python escucha solo en loopback y rechaza peticiones cuyo origen no sea loopback. Si Tailscale no puede obtener certificado o el cliente no está conectado, revisar su estado antes de compartir el enlace.
 
@@ -36,9 +36,9 @@ Se guardó una copia consistente de la base SQLite previa al cambio en `/root/ho
 Desde la PC:
 
 ```sh
-ssh root@192.168.1.23 'runuser -u oci-a1 -- env HOME=/var/lib/oci-a1 /opt/oci-a1/venv/bin/python /opt/oci-a1/app/local_runner.py --status'
-ssh root@192.168.1.23 'runuser -u oci-a1 -- env HOME=/var/lib/oci-a1 /opt/oci-a1/venv/bin/python /opt/oci-a1/app/local_runner.py --check'
-ssh root@192.168.1.23 'pgrep -u oci-a1 -af "[l]ocal_runner.py|[p]hone_cron.py"; stat -c "%a %U:%G %n" /var/lib/oci-a1/.cache/oci-vm/runner-state.json'
+ssh root@<IP-del-telefono> 'runuser -u oci-a1 -- env HOME=/var/lib/oci-a1 /opt/oci-a1/venv/bin/python /opt/oci-a1/app/local_runner.py --status'
+ssh root@<IP-del-telefono> 'runuser -u oci-a1 -- env HOME=/var/lib/oci-a1 /opt/oci-a1/venv/bin/python /opt/oci-a1/app/local_runner.py --check'
+ssh root@<IP-del-telefono> 'pgrep -u oci-a1 -af "[l]ocal_runner.py|[p]hone_cron.py"; stat -c "%a %U:%G %n" /var/lib/oci-a1/.cache/oci-vm/runner-state.json'
 systemctl --user is-active oci-vm.service
 ```
 
@@ -49,7 +49,7 @@ systemctl --user is-active oci-vm.service
 La pausa preventiva no interrumpe el proceso que ya está corriendo. Para una parada ordenada sin duplicar escritores:
 
 ```sh
-ssh root@192.168.1.23 'install -m 0600 -o oci-a1 -g oci-a1 /dev/null /var/lib/oci-a1/paused; pkill -TERM -u oci-a1 -f "^/opt/oci-a1/venv/bin/python /opt/oci-a1/app/local_runner.py$" || true'
+ssh root@<IP-del-telefono> 'install -m 0600 -o oci-a1 -g oci-a1 /dev/null /var/lib/oci-a1/paused; pkill -TERM -u oci-a1 -f "^/opt/oci-a1/venv/bin/python /opt/oci-a1/app/local_runner.py$" || true'
 ```
 
 Confirmar que ya no haya proceso `local_runner.py` y que el supervisor haya terminado. `phone_cron.py` guarda `last-exit`; una salida `2` implica fallo permanente, que debe corregirse antes de reiniciar. Para reanudar con el estado conservado, una vez que el otro host esté detenido, retirar `paused` y, **solo después de resolver una salida permanente**, retirar `last-exit` (no `runner-state.json`). Cron lanzará el monitor en el siguiente minuto.
